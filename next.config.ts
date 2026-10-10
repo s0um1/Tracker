@@ -9,7 +9,7 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   experimental: {
-    optimizePackageImports: ["d3"],
+    optimizePackageImports: ["d3", "lucide-react"],
   },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];

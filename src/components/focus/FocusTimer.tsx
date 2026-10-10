@@ -123,6 +123,7 @@ export default function FocusTimer({
                 max={180}
                 value={durationMinutes}
                 onChange={(e) => applyDuration(Number(e.target.value) || DEFAULT_FOCUS_MINUTES)}
+                onWheel={(e) => e.currentTarget.blur()}
                 className="w-14 rounded-md border border-[var(--input-border)] bg-[var(--input-bg)] px-2 py-1 text-center text-xs text-[var(--foreground)]"
               />
               min

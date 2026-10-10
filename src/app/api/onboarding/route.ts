@@ -7,7 +7,7 @@ import {
   generateJoinCode,
   joinCodeExpiryDate,
   isGroupFull,
-  isJoinCodeExpired,
+  isJoinCodeActive,
   isValidJoinCode,
   MAX_GROUP_MEMBERS,
   normalizeJoinCode,
@@ -40,7 +40,7 @@ export async function POST(request: Request) {
       if (!isValidJoinCode(normalized)) return jsonError("Join code must be 6 digits");
       group = await Group.findOne({ joinCode: normalized });
       if (!group) return jsonError("Invalid join code", 404);
-      if (isJoinCodeExpired(group.joinCodeExpiresAt)) {
+      if (!isJoinCodeActive(group.joinCode, group.joinCodeExpiresAt)) {
         return jsonError("Join code has expired. Ask the group owner for a new code.", 400);
       }
       const alreadyMember = group.members.some((m) => String(m.userId) === userId);

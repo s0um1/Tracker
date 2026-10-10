@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { apiGet, getErrorMessage } from "@/lib/api";
-import { LoadingState, ErrorState } from "@/components/ui/StateViews";
+import { GroupShellSkeleton, ErrorState } from "@/components/ui/StateViews";
 import type { Group } from "@/types";
 
 export default function GroupShell({
@@ -16,17 +16,20 @@ export default function GroupShell({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false;
+    if (!silent) setLoading(true);
     try {
-      const data = await apiGet<Group>(`/api/groups/${groupId}`);
+      const data = await apiGet<Pick<Group, "name" | "description">>(
+        `/api/groups/${groupId}?view=header`
+      );
       setGroup({ name: data.name, description: data.description });
       setError("");
     } catch (err) {
       setError(getErrorMessage(err, "Failed to load group"));
-      setGroup(null);
+      if (!silent) setGroup(null);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [groupId]);
 
@@ -34,7 +37,7 @@ export default function GroupShell({
     load();
   }, [load]);
 
-  if (loading) return <LoadingState />;
+  if (loading && !group) return <GroupShellSkeleton />;
   if (error) return <ErrorState message={error} onRetry={load} />;
   if (!group) return <ErrorState message="Group not found" onRetry={load} />;
 

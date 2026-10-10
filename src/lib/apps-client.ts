@@ -8,6 +8,11 @@ export function getCareerFlowAppUrl(): string {
   );
 }
 
+function navigateAway(url: string) {
+  // Cross-origin SSO handoff — must be a full document navigation, not Next.js router.
+  window.location.href = url;
+}
+
 export async function openCareerFlow(): Promise<void> {
   const careerFlowUrl = getCareerFlowAppUrl();
   try {
@@ -15,14 +20,16 @@ export async function openCareerFlow(): Promise<void> {
     if (res.ok) {
       const body = await res.json();
       if (body.data?.session) {
-        window.location.href = `${careerFlowUrl}/auth/callback?session=${encodeURIComponent(body.data.session)}`;
+        navigateAway(
+          `${careerFlowUrl}/auth/callback?session=${encodeURIComponent(body.data.session)}`
+        );
         return;
       }
     }
   } catch {
     // fall through
   }
-  window.location.href = careerFlowUrl;
+  navigateAway(careerFlowUrl);
 }
 
 export function googleLoginUrl(): string {

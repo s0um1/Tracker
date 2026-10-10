@@ -308,6 +308,7 @@ export interface MemberStat {
   name: string;
   readiness: number;
   tasksCompleted: number;
+  role?: GroupRole;
 }
 
 export interface MemberGamificationStat {
@@ -365,6 +366,25 @@ export interface DashboardData {
   questionsToday: number;
 }
 
+export interface AnalyticsQuestionStatusRow {
+  status: string;
+  label: string;
+  count: number;
+}
+
+export interface AnalyticsTrackRow {
+  name: string;
+  total: number;
+  done: number;
+  percent: number;
+}
+
+export interface AnalyticsActivityDay {
+  date: string;
+  label: string;
+  count: number;
+}
+
 export interface AnalyticsData {
   subjectCompletion: { name: string; percent: number }[];
   topicStatusBreakdown: { status: string; count: number }[];
@@ -372,5 +392,35 @@ export interface AnalyticsData {
   groupStats?: {
     avgReadiness: number;
     weakSubjects: string[];
+  };
+  personal: {
+    summary: {
+      totalQuestions: number;
+      done: number;
+      inProgress: number;
+      studyMinutesWeek: number;
+      tasksCompleted: number;
+      tasksTotal: number;
+      studyStreak: number;
+    };
+    byStatus: AnalyticsQuestionStatusRow[];
+    byTrack: AnalyticsTrackRow[];
+    activity: AnalyticsActivityDay[];
+  };
+  group: {
+    summary: {
+      totalQuestions: number;
+      yourDone: number;
+      yourPoints: number;
+      yourReadiness: number;
+      avgReadiness: number;
+      memberCount: number;
+    };
+    byStatus: AnalyticsQuestionStatusRow[];
+    byTrack: AnalyticsTrackRow[];
+    activity: AnalyticsActivityDay[];
+    pointsTrend: AnalyticsActivityDay[];
+    leaderboard: { userId: string; name: string; points: number }[];
+    memberReadiness: { userId: string; name: string; readiness: number }[];
   };
 }

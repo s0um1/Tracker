@@ -138,17 +138,38 @@ export async function countQuestionsDoneTill(
   groupId: string,
   until?: Date
 ): Promise<number> {
-  const questionIds = await PracticeQuestion.find({ groupId, scope: "group" }).distinct("_id");
-  if (questionIds.length === 0) return 0;
+  const counts = await countQuestionsDoneBatch([userId], groupId, until);
+  return counts.get(userId) ?? 0;
+}
 
-  const query: Record<string, unknown> = {
-    userId,
+/** One query for all members — avoids re-loading group question ids per member. */
+export async function countQuestionsDoneBatch(
+  memberIds: string[],
+  groupId: string,
+  until?: Date
+): Promise<Map<string, number>> {
+  const zeros = new Map(memberIds.map((id) => [id, 0]));
+  if (memberIds.length === 0) return zeros;
+
+  const questionIds = await PracticeQuestion.find({ groupId, scope: "group" }).distinct("_id");
+  if (questionIds.length === 0) return zeros;
+
+  const match: Record<string, unknown> = {
+    userId: { $in: memberIds.map((id) => new mongoose.Types.ObjectId(id)) },
     questionId: { $in: questionIds },
     status: "done",
   };
   if (until) {
-    query.lastPracticed = { $lte: until };
+    match.lastPracticed = { $lte: until };
   }
 
-  return QuestionProgress.countDocuments(query);
+  const rows = await QuestionProgress.aggregate<{ _id: mongoose.Types.ObjectId; count: number }>([
+    { $match: match },
+    { $group: { _id: "$userId", count: { $sum: 1 } } },
+  ]);
+
+  for (const row of rows) {
+    zeros.set(String(row._id), row.count);
+  }
+  return zeros;
 }

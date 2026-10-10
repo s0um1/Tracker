@@ -1,6 +1,14 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useCallback,
+  useMemo,
+  ReactNode,
+} from "react";
 import type { User } from "@/types";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
 import { normalizeUser } from "@/lib/user";
@@ -53,11 +61,12 @@ export function UserProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
-  return (
-    <UserContext.Provider value={{ user, loading, setUser, refreshUser, updateUser, logout }}>
-      {children}
-    </UserContext.Provider>
+  const value = useMemo(
+    () => ({ user, loading, setUser, refreshUser, updateUser, logout }),
+    [user, loading, refreshUser, updateUser, logout]
   );
+
+  return <UserContext.Provider value={value}>{children}</UserContext.Provider>;
 }
 
 export function useUser() {

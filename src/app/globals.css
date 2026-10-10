@@ -85,7 +85,7 @@
   --surface-muted: rgba(245, 240, 234, 0.05);
   --input-bg: rgba(245, 240, 234, 0.04);
   --input-border: rgba(245, 240, 234, 0.1);
-  --overlay: rgba(0, 0, 0, 0.6);
+  --overlay: rgba(0, 0, 0, 0.45);
   --ring: rgba(224, 122, 74, 0.4);
 
   --success: #7eb89a;
@@ -358,6 +358,11 @@ body {
     color: var(--chip-muted-text);
   }
 
+  /* Native <select> in the table can paint above modals on some browsers — hide while modal open */
+  body.growthhub-modal-open #app-main .question-status-select {
+    visibility: hidden;
+  }
+
   .question-status-select {
     appearance: none;
     border-width: 1px;
@@ -512,6 +517,10 @@ input[type="datetime-local"],
 input[type="time"] {
   color: var(--foreground);
   color-scheme: light;
+}
+
+.input-date-end {
+  text-align: right;
 }
 
 html.dark input[type="date"],

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import clsx from "clsx";
-import { isExpandableQuestion } from "@/lib/utils";
+import { isExpandableQuestion, splitQuestionFields } from "@/lib/utils";
 
 export default function ExpandableQuestionContent({
   content,
@@ -14,18 +14,22 @@ export default function ExpandableQuestionContent({
   collapsedClassName?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const { title, description } = splitQuestionFields(content);
   const expandable = isExpandableQuestion(content);
 
   return (
     <div className={className}>
-      <p
-        className={clsx(
-          "text-sm whitespace-pre-wrap text-[var(--foreground)]",
-          !expanded && expandable && collapsedClassName
-        )}
-      >
-        {content}
-      </p>
+      <p className="text-sm font-medium text-[var(--foreground)]">{title}</p>
+      {description ? (
+        <p
+          className={clsx(
+            "mt-1 text-sm whitespace-pre-wrap text-[var(--muted)]",
+            !expanded && expandable && collapsedClassName
+          )}
+        >
+          {description}
+        </p>
+      ) : null}
       {expandable && (
         <button
           type="button"

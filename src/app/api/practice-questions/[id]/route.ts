@@ -6,12 +6,14 @@ import {
   parseDateInput,
   normalizeQuestionStatus,
   isQuestionStatusPracticed,
+  resolveQuestionBody,
 } from "@/lib/utils";
 import { applyFirstDonePoints } from "@/lib/question-gamification";
 import {
   serializeDoc,
   isGroupMember,
   canManageGroup,
+  invalidateGroupInsights,
   syncGroupProgressToPersonal,
   syncQuestionTodoTask,
 } from "@/lib/services";
@@ -79,6 +81,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         await syncQuestionTodoTask(userId, question, status);
       }
 
+      invalidateGroupInsights(String(question.groupId));
+
       if (!canEditContent) {
         return jsonOk({
           ...serializeDoc(question),
@@ -96,7 +100,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (!canEditContent) return jsonError("Not authorized to edit this question", 403);
 
     const updates: Record<string, unknown> = {};
-    if (body.content?.trim()) updates.content = body.content.trim();
+    if (body.title !== undefined || body.content !== undefined || body.description !== undefined) {
+      const resolved = resolveQuestionBody({
+        content: body.content,
+        title: body.title,
+        description: body.description,
+      });
+      if ("error" in resolved) return jsonError(resolved.error);
+      updates.content = resolved.content;
+    }
     if (body.link !== undefined) updates.link = body.link?.trim() || undefined;
     if (body.difficulty) updates.difficulty = body.difficulty;
     if (body.subjectId) {
@@ -117,20 +129,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     }
     if (question.scope === "personal") {
       if (nextStatus) {
-        const prevStatus = normalizeQuestionStatus(question.status ?? "not_started");
         updates.status = nextStatus;
         if (isQuestionStatusPracticed(nextStatus)) updates.lastPracticed = new Date();
-        if (nextStatus === "done") {
-          const award = applyFirstDonePoints(
-            prevStatus,
-            nextStatus,
-            question.practiceDate ?? question.createdAt,
-            question
-          );
-          if (award.pointsAwarded != null) updates.pointsAwarded = award.pointsAwarded;
-          if (award.firstCompletedAt) updates.firstCompletedAt = award.firstCompletedAt;
-          pointsEarnedNow = award.pointsEarnedNow;
-        }
       }
       if (body.confidence) updates.confidence = body.confidence;
       if (body.notes !== undefined) updates.notes = body.notes?.trim() || undefined;
@@ -162,9 +162,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return jsonOk({
       ...serializeDoc(updated),
       status: normalizeQuestionStatus(updated.status ?? "not_started"),
-      pointsAwarded: updated.pointsAwarded,
-      firstCompletedAt: updated.firstCompletedAt?.toISOString(),
-      pointsEarnedNow,
     });
   } catch (err) {
     if (err instanceof Error && err.message === "Unauthorized") return unauthorized();

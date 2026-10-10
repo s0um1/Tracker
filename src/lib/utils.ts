@@ -26,26 +26,44 @@ export function needsJoinCodeReissue(
   joinCode: string,
   expiresAt?: string | Date | null
 ): boolean {
-  return isJoinCodeExpired(expiresAt) || !isValidJoinCode(joinCode);
+  return !isJoinCodeActive(joinCode, expiresAt);
 }
 
 export function joinCodeExpiryDate(from = new Date()): Date {
   return new Date(from.getTime() + JOIN_CODE_TTL_MS);
 }
 
+function joinCodeExpiryMs(expiresAt?: string | Date | null): number | null {
+  if (!expiresAt) return null;
+  const ms = new Date(expiresAt).getTime();
+  return Number.isNaN(ms) ? null : ms;
+}
+
 export function isJoinCodeExpired(expiresAt?: string | Date | null): boolean {
-  if (!expiresAt) return true;
-  return new Date(expiresAt).getTime() <= Date.now();
+  const exp = joinCodeExpiryMs(expiresAt);
+  if (exp === null) return true;
+  return exp <= Date.now();
+}
+
+/** Active short-lived invite (15m TTL). Ignores legacy/demo rows with far-future expiry. */
+export function isJoinCodeActive(joinCode: string, expiresAt?: string | Date | null): boolean {
+  if (!isValidJoinCode(joinCode)) return false;
+  const exp = joinCodeExpiryMs(expiresAt);
+  if (exp === null || exp <= Date.now()) return false;
+  const remaining = exp - Date.now();
+  return remaining <= JOIN_CODE_TTL_MS + 60_000;
 }
 
 export function joinCodeSecondsRemaining(expiresAt?: string | Date | null): number {
-  if (!expiresAt) return 0;
-  return Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 1000));
+  const exp = joinCodeExpiryMs(expiresAt);
+  if (exp === null) return 0;
+  return Math.max(0, Math.ceil((exp - Date.now()) / 1000));
 }
 
 export function formatJoinCodeCountdown(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
+  const total = Math.max(0, Math.floor(seconds));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
@@ -204,7 +222,45 @@ export function questionPreview(content: string, maxLen = 80): string {
   return line.length > maxLen ? `${line.slice(0, maxLen)}…` : line;
 }
 
+const QUESTION_BODY_SEP = "\n\n";
+
+export function joinQuestionFields(title: string, description?: string): string {
+  const t = title.trim();
+  const d = description?.trim() ?? "";
+  if (!t) return d;
+  if (!d) return t;
+  return `${t}${QUESTION_BODY_SEP}${d}`;
+}
+
+export function splitQuestionFields(content: string): { title: string; description: string } {
+  const trimmed = content.trim();
+  if (!trimmed) return { title: "", description: "" };
+  const idx = trimmed.indexOf(QUESTION_BODY_SEP);
+  if (idx === -1) return { title: trimmed, description: "" };
+  return {
+    title: trimmed.slice(0, idx).trim(),
+    description: trimmed.slice(idx + QUESTION_BODY_SEP.length).trim(),
+  };
+}
+
+export function resolveQuestionBody(body: {
+  content?: string;
+  title?: string;
+  description?: string;
+}): { content: string } | { error: string } {
+  const title = body.title?.trim();
+  const description = body.description?.trim() ?? "";
+  if (title) {
+    return { content: joinQuestionFields(title, description) };
+  }
+  const legacy = body.content?.trim();
+  if (legacy) return { content: legacy };
+  return { error: "Question title is required" };
+}
+
 export function isExpandableQuestion(content: string): boolean {
+  const { description } = splitQuestionFields(content);
+  if (description) return description.length > 80 || description.includes("\n");
   return content.includes("\n") || content.length > 120;
 }
 
@@ -308,7 +364,7 @@ export function normalizeQuestionStatus(status: string): QuestionStatus {
   return LEGACY_QUESTION_STATUS[status] ?? "not_started";
 }
 
-export type QuestionSortField = "date" | "status" | "track";
+export type QuestionSortField = "date" | "status" | "track" | "scope";
 export type QuestionSortDir = "asc" | "desc";
 
 export function questionStatusSortIndex(status: string): number {
@@ -321,6 +377,7 @@ export function compareQuestions<
     practiceDate?: string;
     createdAt?: string;
     status: string;
+    scope?: string;
     trackLabel?: string;
     subjectName?: string;
   },
@@ -333,6 +390,9 @@ export function compareQuestions<
   }
   if (sortBy === "status") {
     return (questionStatusSortIndex(a.status) - questionStatusSortIndex(b.status)) * dir;
+  }
+  if (sortBy === "scope") {
+    return (a.scope ?? "").localeCompare(b.scope ?? "") * dir;
   }
   const ta = (a.trackLabel || a.subjectName || "").toLowerCase();
   const tb = (b.trackLabel || b.subjectName || "").toLowerCase();

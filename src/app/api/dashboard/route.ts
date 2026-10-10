@@ -8,8 +8,7 @@ import {
 } from "@/lib/question-stats";
 import {
   serializeDoc,
-  ensureTopicProgress,
-  getMemberStatsBatch,
+  getGroupInsights,
   getTodayQuestionsForUser,
 } from "@/lib/services";
 import { getInterviewCountdown } from "@/lib/readiness";
@@ -26,40 +25,49 @@ export async function GET(request: Request) {
     const userId = requireAuthUserId(request);
     await connectToDatabase();
 
-    const user = await User.findById(userId);
+    const user = await User.findById(userId)
+      .select("activeGroupId studyStreak lastStudyDate")
+      .lean();
     if (!user) return jsonError("User not found", 404);
     if (!user.activeGroupId) return jsonError("No active group", 400);
 
     const groupId = String(user.activeGroupId);
     const group = await Group.findById(groupId).lean();
     if (!group) {
-      user.activeGroupId = undefined;
-      await user.save();
+      await User.findByIdAndUpdate(userId, { $unset: { activeGroupId: 1 } });
       return jsonError("No active group", 400);
     }
 
-    await ensureTopicProgress(userId, groupId);
-
     const countdown = getInterviewCountdown(group.interviewDate);
-
     const memberIds = (group.members ?? []).map((m) => String(m.userId));
 
-    const [memberStats, todayQuestions, subjects, groupQuestions, personalQuestions, pendingTasks] =
-      await Promise.all([
-        getMemberStatsBatch(memberIds, groupId),
-        getTodayQuestionsForUser(userId, groupId),
-        Subject.find({ groupId, isActive: true }).lean(),
-        PracticeQuestion.find({ groupId, scope: "group" })
-          .select("_id subjectId practiceDate createdAt")
-          .lean(),
-        PracticeQuestion.find({ userId, groupId, scope: "personal" })
-          .select("subjectId practiceDate createdAt")
-          .lean(),
-        PrepTask.find({ userId, groupId, status: { $ne: "completed" }, dueDate: { $exists: true } })
-          .sort({ dueDate: 1 })
-          .limit(5)
-          .lean(),
-      ]);
+    const [
+      { memberStats },
+      todayQuestions,
+      subjects,
+      groupQuestions,
+      personalQuestions,
+      pendingTasks,
+    ] = await Promise.all([
+      getGroupInsights(groupId, memberIds),
+      getTodayQuestionsForUser(userId, groupId),
+      Subject.find({ groupId, isActive: true }).lean(),
+      PracticeQuestion.find({ groupId, scope: "group" })
+        .select("_id subjectId practiceDate createdAt")
+        .lean(),
+      PracticeQuestion.find({ userId, groupId, scope: "personal" })
+        .select("subjectId practiceDate createdAt")
+        .lean(),
+      PrepTask.find({
+        userId,
+        groupId,
+        status: { $ne: "completed" },
+        dueDate: { $exists: true },
+      })
+        .sort({ dueDate: 1 })
+        .limit(5)
+        .lean(),
+    ]);
 
     const readiness = memberStats.find((m) => m.userId === userId)?.readiness ?? 0;
 
@@ -94,7 +102,12 @@ export async function GET(request: Request) {
         topicCount: 0,
         completedTopics: 0,
         completionPercent,
-        confidence: completionPercent < 40 ? "weak" as const : completionPercent < 75 ? "okay" as const : "strong" as const,
+        confidence:
+          completionPercent < 40
+            ? ("weak" as const)
+            : completionPercent < 75
+              ? ("okay" as const)
+              : ("strong" as const),
         studyMinutes: 0,
         questionCount,
         questionsByDate: qStats ? toQuestionsByDate(qStats.byDate) : [],
@@ -126,7 +139,7 @@ export async function GET(request: Request) {
         date: t.dueDate!.toISOString(),
         priority: t.priority,
       })),
-      studyStreak: user.studyStreak,
+      studyStreak: user.studyStreak ?? 0,
       questionsToday,
     };
 

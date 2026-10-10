@@ -5,10 +5,11 @@ import {
   serializeDoc,
   isGroupMember,
   canManageGroup,
-  getMemberStatsBatch,
-  getGroupGamificationStats,
+  getGroupInsights,
+  listGroupPracticeQuestionsForUser,
   deleteGroupData,
   clearActiveGroupForMembers,
+  invalidateGroupInsights,
 } from "@/lib/services";
 import Group from "@/models/Group";
 import Subject from "@/models/Subject";
@@ -21,38 +22,62 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const userId = requireAuthUserId(request);
     await connectToDatabase();
     const { id } = await params;
+    const { searchParams } = new URL(request.url);
+    const view = searchParams.get("view");
 
-    const groupDoc = await Group.findById(id);
+    const groupDoc = await Group.findById(id).lean();
     if (!groupDoc) return jsonError("Group not found", 404);
-    const group = groupDoc.toObject();
-    if (!isGroupMember(group, userId)) return jsonError("Unauthorized", 403);
+    if (!isGroupMember(groupDoc, userId)) return jsonError("Unauthorized", 403);
 
-    const [subjects, topics] = await Promise.all([
-      Subject.find({ groupId: id, isActive: true }).lean(),
-      Topic.find({ groupId: id }).lean(),
-    ]);
+    if (view === "header") {
+      const me = groupDoc.members.find((m) => String(m.userId) === userId);
+      return jsonOk({
+        _id: String(groupDoc._id),
+        name: groupDoc.name,
+        description: groupDoc.description ?? "",
+        myRole: (me?.role as GroupRole | undefined) ?? null,
+      });
+    }
 
     const roleMap = new Map(
-      group.members.map((m) => [String(m.userId), m.role as GroupRole])
+      groupDoc.members.map((m) => [String(m.userId), m.role as GroupRole])
     );
-    const memberIds = group.members.map((m) => String(m.userId));
-    const [memberStats, gamification] = await Promise.all([
-      getMemberStatsBatch(memberIds, id, roleMap),
-      getGroupGamificationStats(id, memberIds),
-    ]);
+    const memberIds = groupDoc.members.map((m) => String(m.userId));
+    const include = new Set(
+      (searchParams.get("include") ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    );
 
-    const countdown = getInterviewCountdown(group.interviewDate);
+    const [topicCount, { memberStats, gamification }, subjects, groupQuestions] =
+      await Promise.all([
+        Topic.countDocuments({ groupId: id }),
+        getGroupInsights(id, memberIds, roleMap),
+        include.has("subjects")
+          ? Subject.find({ groupId: id, scope: "group", isActive: true })
+              .sort({ order: 1 })
+              .lean()
+              .then((rows) => rows.map(serializeDoc))
+          : Promise.resolve(undefined),
+        include.has("questions")
+          ? listGroupPracticeQuestionsForUser(id, userId)
+          : Promise.resolve(undefined),
+      ]);
+
+    const countdown = getInterviewCountdown(groupDoc.interviewDate);
 
     return jsonOk({
-      ...serializeDoc(group),
-      subjects: subjects.map(serializeDoc),
-      topicCount: topics.length,
+      ...serializeDoc(groupDoc),
+      topicCount,
       memberStats,
       gamification,
       countdown: {
         ...countdown,
-        interviewDate: group.interviewDate?.toISOString() ?? null,
+        interviewDate: groupDoc.interviewDate?.toISOString() ?? null,
       },
+      ...(subjects ? { subjects } : {}),
+      ...(groupQuestions ? { groupQuestions } : {}),
     });
   } catch (err) {
     if (err instanceof Error && err.message === "Unauthorized") return unauthorized();
@@ -78,6 +103,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (description !== undefined) group.description = description?.trim();
     if (interviewDate) group.interviewDate = new Date(interviewDate);
     await group.save();
+    invalidateGroupInsights(id);
 
     return jsonOk(serializeDoc(group));
   } catch (err) {
@@ -94,7 +120,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
 
     const group = await Group.findById(id);
     if (!group) return jsonError("Group not found", 404);
-    if (String(group.ownerId) !== userId) return jsonError("Only owner can delete group", 403);
+    if (String(group.ownerId) !== userId) return jsonError("Only the group admin can delete the group", 403);
 
     await deleteGroupData(id);
     await clearActiveGroupForMembers(id);

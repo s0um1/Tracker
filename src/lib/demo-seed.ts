@@ -13,7 +13,13 @@ import MockInterviewSlot from "@/models/MockInterviewSlot";
 import MockInterviewRound from "@/models/MockInterviewRound";
 import StudySession from "@/models/StudySession";
 import PreparationPlan from "@/models/PreparationPlan";
-import { addIstDays, istDateFromParts, startOfDay, toDateInputValue } from "@/lib/utils";
+import {
+  addIstDays,
+  istDateFromParts,
+  joinCodeExpiryDate,
+  startOfDay,
+  toDateInputValue,
+} from "@/lib/utils";
 import { hashAuthCode } from "@/lib/auth";
 
 export const GUEST_USERNAME = "guest_demo";
@@ -171,7 +177,6 @@ async function syncDemoMockInterviews(
   const round2 = rounds[1];
   if (!round1 || !round2) return;
 
-  const memberCount = allMemberIds.length;
   for (let i = 0; i < allMemberIds.length; i++) {
     await MockInterviewSlot.create({
       groupId,
@@ -347,7 +352,7 @@ export async function ensureDemoData() {
       name: "SWITCH Prep Squad",
       description: "Demo prep group — explore all features",
       joinCode: "000001",
-      joinCodeExpiresAt: daysFromNow(365),
+      joinCodeExpiresAt: joinCodeExpiryDate(),
       interviewDate,
       ownerId: guest._id,
       members: [

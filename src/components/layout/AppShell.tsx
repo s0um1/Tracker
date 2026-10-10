@@ -5,7 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { useUser } from "@/components/providers/UserProvider";
 import Sidebar from "./Sidebar";
 import MobileNav from "./MobileNav";
-import { LoadingState } from "@/components/ui/StateViews";
+import { AppShellSkeleton } from "@/components/ui/StateViews";
 import ThemeToggle from "@/components/ui/ThemeToggle";
 import { getHomePath } from "@/lib/home";
 
@@ -34,11 +34,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }, [user, loading, isPublic, isOnboarding, router]);
 
   if (loading && !isPublic && !isOnboarding) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <LoadingState message="Loading GrowthHub..." />
-      </div>
-    );
+    return <AppShellSkeleton />;
   }
 
   if (isPublic || isOnboarding) {

@@ -1,7 +1,8 @@
 "use client";
 
 import clsx from "clsx";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
 export default function Modal({
@@ -17,28 +18,42 @@ export default function Modal({
   children: React.ReactNode;
   size?: "sm" | "md" | "lg";
 }) {
+  const [mounted, setMounted] = useState(false);
+
   useEffect(() => {
-    if (!open) return;
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!open) {
+      document.body.style.overflow = "";
+      document.body.classList.remove("growthhub-modal-open");
+      return;
+    }
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     document.addEventListener("keydown", handler);
     document.body.style.overflow = "hidden";
+    document.body.classList.add("growthhub-modal-open");
     return () => {
       document.removeEventListener("keydown", handler);
       document.body.style.overflow = "";
+      document.body.classList.remove("growthhub-modal-open");
     };
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (!open || !mounted) return null;
 
   const sizes = { sm: "max-w-md", md: "max-w-lg", lg: "max-w-2xl" };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center">
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[200] isolate flex items-end justify-center p-4 sm:items-center"
+      role="presentation"
+    >
       <div
-        className="absolute inset-0 animate-fade-in backdrop-blur-sm"
-        style={{ background: "var(--overlay)" }}
+        className="absolute inset-0 z-0 animate-fade-in bg-[var(--overlay)]"
         onClick={onClose}
         aria-hidden
       />
@@ -47,7 +62,7 @@ export default function Modal({
         aria-modal="true"
         aria-labelledby="modal-title"
         className={clsx(
-          "relative w-full animate-scale-in rounded-2xl bg-[var(--card)] p-6 shadow-panel",
+          "relative z-10 isolate max-h-[min(90dvh,100%)] w-full overflow-y-auto animate-scale-in rounded-2xl bg-[var(--card)] p-6 shadow-panel",
           sizes[size]
         )}
       >
@@ -66,6 +81,7 @@ export default function Modal({
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

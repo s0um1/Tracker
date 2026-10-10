@@ -95,7 +95,7 @@ export default function OnboardingPage() {
         <Card>
           {step === 0 && (
             <div className="space-y-4">
-              <h2 className="text-lg font-semibold">What's your name?</h2>
+              <h2 className="text-lg font-semibold">What&apos;s your name?</h2>
               <input
                 type="text"
                 value={name}

@@ -1,13 +1,7 @@
 import { connectToDatabase } from "@/lib/mongodb";
 import { requireAuthUserId, unauthorized } from "@/lib/api-auth";
-import {
-  jsonOk,
-  jsonError,
-  isJoinCodeExpired,
-  isValidJoinCode,
-  JOIN_CODE_TTL_MINUTES,
-} from "@/lib/utils";
-import { isGroupMember, issueJoinCode } from "@/lib/services";
+import { jsonOk, jsonError, isJoinCodeActive } from "@/lib/utils";
+import { isGroupMember, issueJoinCode, canManageGroup } from "@/lib/services";
 import Group from "@/models/Group";
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -18,18 +12,24 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const group = await Group.findById(id);
     if (!group) return jsonError("Group not found", 404);
-    if (isGroupMember(group, userId) !== "owner") {
-      return jsonError("Only owner can regenerate join code", 403);
+    const role = isGroupMember(group, userId);
+    if (!canManageGroup(role)) {
+      return jsonError("Only admins and co-admins can generate invite codes", 403);
     }
 
+    const body = await request.json().catch(() => ({}));
+    const force = body?.force === true;
+
     if (
-      isValidJoinCode(group.joinCode) &&
-      !isJoinCodeExpired(group.joinCodeExpiresAt)
+      !force &&
+      isJoinCodeActive(group.joinCode, group.joinCodeExpiresAt)
     ) {
-      return jsonError(
-        `Current invite code is still active. Wait until it expires (${JOIN_CODE_TTL_MINUTES} min) before generating a new one.`,
-        400
-      );
+      const expiresAt = group.joinCodeExpiresAt;
+      return jsonOk({
+        joinCode: group.joinCode,
+        joinCodeExpiresAt:
+          expiresAt instanceof Date ? expiresAt.toISOString() : new Date(expiresAt).toISOString(),
+      });
     }
 
     const { joinCode, joinCodeExpiresAt } = await issueJoinCode(group, id);

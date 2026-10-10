@@ -9,7 +9,7 @@ function guestAuthAllowed(): boolean {
   return process.env.NODE_ENV !== "production";
 }
 
-export async function POST(request: Request) {
+export async function POST() {
   try {
     if (!guestAuthAllowed()) {
       return jsonError("Guest login is not available", 404);

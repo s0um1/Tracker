@@ -18,10 +18,7 @@ export async function GET(
     const { id: targetId } = await params;
     await connectToDatabase();
 
-    const [viewer, target] = await Promise.all([
-      User.findById(viewerId).lean(),
-      User.findById(targetId).lean(),
-    ]);
+    const target = await User.findById(targetId).lean();
     if (!target) return jsonError("User not found", 404);
 
     const viewerGroups = await Group.find({

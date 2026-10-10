@@ -14,6 +14,9 @@ import MockInterviewRound from "@/models/MockInterviewRound";
 import StudySession from "@/models/StudySession";
 import PreparationPlan from "@/models/PreparationPlan";
 import type { Confidence, GroupRole, TopicStatus } from "@/types";
+import { canManageGroup } from "@/lib/group-roles";
+
+export { canManageGroup };
 import { calculateReadiness, getInterviewCountdown } from "./readiness";
 import {
   formatSubjectTrack,
@@ -31,6 +34,189 @@ import {
   buildMemberGamification,
   type GroupGamification,
 } from "./question-gamification";
+import { getCached, groupInsightsCacheKey, invalidateCachePrefix } from "./ttl-cache";
+
+const GROUP_INSIGHTS_TTL_MS = 30_000;
+
+export function invalidateGroupInsights(groupId: string): void {
+  invalidateCachePrefix(groupInsightsCacheKey(groupId));
+  invalidateCachePrefix("analytics:");
+}
+
+type GroupStatsContext = {
+  topics: { _id: mongoose.Types.ObjectId; status: string; confidence: string }[];
+  users: { _id: mongoose.Types.ObjectId; name?: string; studyStreak?: number }[];
+  topicProgress: {
+    userId: mongoose.Types.ObjectId;
+    topicId: mongoose.Types.ObjectId;
+    status?: string;
+    confidence?: string;
+  }[];
+  mocks: { userId: mongoose.Types.ObjectId; score: number }[];
+  taskStats: { _id: mongoose.Types.ObjectId; total: number; completed: number }[];
+  group: { interviewDate?: Date } | null;
+  questions: {
+    _id: mongoose.Types.ObjectId;
+    practiceDate?: Date;
+    createdAt: Date;
+  }[];
+  questionProgress: {
+    userId: mongoose.Types.ObjectId;
+    questionId: mongoose.Types.ObjectId;
+    status?: string;
+    lastPracticed?: Date;
+    pointsAwarded?: number;
+    firstCompletedAt?: Date;
+  }[];
+};
+
+async function loadGroupStatsContext(
+  groupId: string,
+  memberIds: string[]
+): Promise<GroupStatsContext | null> {
+  if (memberIds.length === 0) return null;
+
+  const objectIds = memberIds.map((id) => new mongoose.Types.ObjectId(id));
+  const groupObjectId = new mongoose.Types.ObjectId(groupId);
+
+  const topics = await Topic.find({ groupId }).lean();
+  const topicIds = topics.map((t) => t._id);
+  const questions = await PracticeQuestion.find({ groupId, scope: "group" }).lean();
+  const questionIds = questions.map((q) => q._id);
+
+  const [users, topicProgress, mocks, taskStats, group, questionProgress] = await Promise.all([
+    User.find({ _id: { $in: objectIds } }).lean(),
+    topicIds.length > 0
+      ? TopicProgress.find({ userId: { $in: objectIds }, topicId: { $in: topicIds } }).lean()
+      : Promise.resolve([]),
+    MockInterview.find({ userId: { $in: objectIds }, groupId }).lean(),
+    PrepTask.aggregate<{
+      _id: mongoose.Types.ObjectId;
+      total: number;
+      completed: number;
+    }>([
+      { $match: { userId: { $in: objectIds }, groupId: groupObjectId } },
+      {
+        $group: {
+          _id: "$userId",
+          total: { $sum: 1 },
+          completed: { $sum: { $cond: [{ $eq: ["$status", "completed"] }, 1, 0] } },
+        },
+      },
+    ]),
+    Group.findById(groupId).lean(),
+    questionIds.length > 0
+      ? QuestionProgress.find({
+          userId: { $in: objectIds },
+          questionId: { $in: questionIds },
+        }).lean()
+      : Promise.resolve([]),
+  ]);
+
+  return {
+    topics,
+    users,
+    topicProgress,
+    mocks,
+    taskStats,
+    group,
+    questions,
+    questionProgress,
+  };
+}
+
+function memberStatsFromContext(
+  memberIds: string[],
+  roleMap: Map<string, GroupRole> | undefined,
+  ctx: GroupStatsContext
+): MemberStat[] {
+  const countdown = ctx.group
+    ? getInterviewCountdown(ctx.group.interviewDate)
+    : { days: 14, hours: 0, totalHours: 336, isPast: false };
+
+  const userMap = new Map(ctx.users.map((u) => [String(u._id), u]));
+  const taskStatsMap = new Map(ctx.taskStats.map((t) => [String(t._id), t]));
+
+  const progressByUser = new Map<string, typeof ctx.topicProgress>();
+  for (const p of ctx.topicProgress) {
+    const uid = String(p.userId);
+    const list = progressByUser.get(uid) ?? [];
+    list.push(p);
+    progressByUser.set(uid, list);
+  }
+
+  const mocksByUser = new Map<string, typeof ctx.mocks>();
+  for (const m of ctx.mocks) {
+    const uid = String(m.userId);
+    const list = mocksByUser.get(uid) ?? [];
+    list.push(m);
+    mocksByUser.set(uid, list);
+  }
+
+  return memberIds.map((userId) => {
+    const userProgress = progressByUser.get(userId) ?? [];
+    const progressMap = new Map(userProgress.map((p) => [String(p.topicId), p]));
+
+    const topicData = ctx.topics.map((t) => {
+      const p = progressMap.get(String(t._id));
+      return {
+        status: (p?.status ?? t.status) as TopicStatus,
+        confidence: (p?.confidence ?? t.confidence) as Confidence,
+      };
+    });
+
+    const userMocks = mocksByUser.get(userId) ?? [];
+    const user = userMap.get(userId);
+    const stats = taskStatsMap.get(userId);
+
+    const readiness = calculateReadiness({
+      topics: topicData,
+      tasksCompleted: stats?.completed ?? 0,
+      tasksTotal: stats?.total ?? 0,
+      mockScores: userMocks.map((m) => m.score),
+      studyStreak: user?.studyStreak ?? 0,
+      daysUntilInterview: countdown.days,
+    });
+
+    return {
+      userId,
+      name: user?.name ?? "Unknown",
+      readiness,
+      tasksCompleted: stats?.completed ?? 0,
+      role: roleMap?.get(userId),
+    };
+  });
+}
+
+function gamificationFromContext(memberIds: string[], ctx: GroupStatsContext): GroupGamification {
+  const userMap = new Map(ctx.users.map((u) => [String(u._id), u.name]));
+  const progressByUser = new Map<string, Map<string, (typeof ctx.questionProgress)[number]>>();
+  for (const p of ctx.questionProgress) {
+    const uid = String(p.userId);
+    const byQuestion = progressByUser.get(uid) ?? new Map();
+    byQuestion.set(String(p.questionId), p);
+    progressByUser.set(uid, byQuestion);
+  }
+
+  const members = memberIds.map((userId) => {
+    const byQuestion = progressByUser.get(userId) ?? new Map();
+    const memberQuestions = ctx.questions.map((q) => {
+      const p = byQuestion.get(String(q._id));
+      return {
+        _id: String(q._id),
+        practiceDate: q.practiceDate ?? q.createdAt,
+        createdAt: q.createdAt,
+        status: normalizeQuestionStatus(p?.status ?? "not_started"),
+        lastPracticed: p?.lastPracticed,
+        pointsAwarded: p?.pointsAwarded,
+        firstCompletedAt: p?.firstCompletedAt,
+      };
+    });
+    return buildMemberGamification(userId, userMap.get(userId) ?? "Unknown", memberQuestions);
+  });
+
+  return buildGroupGamification(members);
+}
 
 export async function getUserReadiness(userId: string, groupId: string): Promise<number> {
   const topics = await Topic.find({ groupId }).lean();
@@ -308,14 +494,10 @@ export async function ensureFreshJoinCodeForOwner(
 ): Promise<InstanceType<typeof Group> | null> {
   const group = await Group.findById(groupId);
   if (!group) return null;
-  if (isGroupMember(group, userId) !== "owner") return group;
+  if (!canManageGroup(isGroupMember(group, userId))) return group;
   if (!needsJoinCodeReissue(group.joinCode, group.joinCodeExpiresAt)) return group;
   await issueJoinCode(group, groupId);
   return group;
-}
-
-export function canManageGroup(role: GroupRole | null): boolean {
-  return role === "owner" || role === "admin";
 }
 
 /** ponytail: deletes group-scoped data; upgrade path is soft-delete + archive if retention needed */
@@ -361,96 +543,31 @@ export interface MemberStat {
   role?: GroupRole;
 }
 
+export async function getGroupInsights(
+  groupId: string,
+  memberIds: string[],
+  roleMap?: Map<string, GroupRole>
+): Promise<{ memberStats: MemberStat[]; gamification: GroupGamification }> {
+  return getCached(groupInsightsCacheKey(groupId), GROUP_INSIGHTS_TTL_MS, async () => {
+    const ctx = await loadGroupStatsContext(groupId, memberIds);
+    if (!ctx) {
+      return { memberStats: [], gamification: buildGroupGamification([]) };
+    }
+    return {
+      memberStats: memberStatsFromContext(memberIds, roleMap, ctx),
+      gamification: gamificationFromContext(memberIds, ctx),
+    };
+  });
+}
+
 export async function getMemberStatsBatch(
   memberIds: string[],
   groupId: string,
   roleMap?: Map<string, GroupRole>
 ): Promise<MemberStat[]> {
-  if (memberIds.length === 0) return [];
-
-  const objectIds = memberIds.map((id) => new mongoose.Types.ObjectId(id));
-  const groupObjectId = new mongoose.Types.ObjectId(groupId);
-
-  const topics = await Topic.find({ groupId }).lean();
-  const topicIds = topics.map((t) => t._id);
-
-  const [users, progressList, mocksList, taskStats, group] = await Promise.all([
-    User.find({ _id: { $in: objectIds } }).lean(),
-    TopicProgress.find({ userId: { $in: objectIds }, topicId: { $in: topicIds } }).lean(),
-    MockInterview.find({ userId: { $in: objectIds }, groupId }).lean(),
-    PrepTask.aggregate<{
-      _id: mongoose.Types.ObjectId;
-      total: number;
-      completed: number;
-    }>([
-      { $match: { userId: { $in: objectIds }, groupId: groupObjectId } },
-      {
-        $group: {
-          _id: "$userId",
-          total: { $sum: 1 },
-          completed: { $sum: { $cond: [{ $eq: ["$status", "completed"] }, 1, 0] } },
-        },
-      },
-    ]),
-    Group.findById(groupId).lean(),
-  ]);
-
-  const countdown = group
-    ? getInterviewCountdown(group.interviewDate)
-    : { days: 14, hours: 0, totalHours: 336, isPast: false };
-
-  const userMap = new Map(users.map((u) => [String(u._id), u]));
-  const taskStatsMap = new Map(taskStats.map((t) => [String(t._id), t]));
-
-  const progressByUser = new Map<string, typeof progressList>();
-  for (const p of progressList) {
-    const uid = String(p.userId);
-    const list = progressByUser.get(uid) ?? [];
-    list.push(p);
-    progressByUser.set(uid, list);
-  }
-
-  const mocksByUser = new Map<string, typeof mocksList>();
-  for (const m of mocksList) {
-    const uid = String(m.userId);
-    const list = mocksByUser.get(uid) ?? [];
-    list.push(m);
-    mocksByUser.set(uid, list);
-  }
-
-  return memberIds.map((userId) => {
-    const userProgress = progressByUser.get(userId) ?? [];
-    const progressMap = new Map(userProgress.map((p) => [String(p.topicId), p]));
-
-    const topicData = topics.map((t) => {
-      const p = progressMap.get(String(t._id));
-      return {
-        status: (p?.status ?? t.status) as TopicStatus,
-        confidence: (p?.confidence ?? t.confidence) as Confidence,
-      };
-    });
-
-    const userMocks = mocksByUser.get(userId) ?? [];
-    const user = userMap.get(userId);
-    const stats = taskStatsMap.get(userId);
-
-    const readiness = calculateReadiness({
-      topics: topicData,
-      tasksCompleted: stats?.completed ?? 0,
-      tasksTotal: stats?.total ?? 0,
-      mockScores: userMocks.map((m) => m.score),
-      studyStreak: user?.studyStreak ?? 0,
-      daysUntilInterview: countdown.days,
-    });
-
-    return {
-      userId,
-      name: user?.name ?? "Unknown",
-      readiness,
-      tasksCompleted: stats?.completed ?? 0,
-      role: roleMap?.get(userId),
-    };
-  });
+  const ctx = await loadGroupStatsContext(groupId, memberIds);
+  if (!ctx) return [];
+  return memberStatsFromContext(memberIds, roleMap, ctx);
 }
 
 export async function getUserReadinessBatch(
@@ -465,48 +582,57 @@ export async function getGroupGamificationStats(
   groupId: string,
   memberIds: string[]
 ): Promise<GroupGamification> {
-  if (memberIds.length === 0) {
-    return buildGroupGamification([]);
-  }
+  const ctx = await loadGroupStatsContext(groupId, memberIds);
+  if (!ctx) return buildGroupGamification([]);
+  return gamificationFromContext(memberIds, ctx);
+}
 
-  const objectIds = memberIds.map((id) => new mongoose.Types.ObjectId(id));
-  const questions = await PracticeQuestion.find({ groupId, scope: "group" }).lean();
-  const questionIds = questions.map((q) => q._id);
-
-  const [users, progress] = await Promise.all([
-    User.find({ _id: { $in: objectIds } }).lean(),
-    questionIds.length > 0
-      ? QuestionProgress.find({ userId: { $in: objectIds }, questionId: { $in: questionIds } }).lean()
-      : Promise.resolve([]),
+/** Group tab question list — one DB round-trip for progress (scoped by question ids). */
+export async function listGroupPracticeQuestionsForUser(groupId: string, userId: string) {
+  const [questions, subjects] = await Promise.all([
+    PracticeQuestion.find({ groupId, scope: "group" })
+      .sort({ practiceDate: -1, createdAt: -1 })
+      .lean(),
+    Subject.find({ groupId, scope: "group", isActive: true })
+      .sort({ order: 1 })
+      .select("name totalQuestions contentUnit")
+      .lean(),
   ]);
 
-  const userMap = new Map(users.map((u) => [String(u._id), u.name]));
-  const progressByUser = new Map<string, Map<string, (typeof progress)[number]>>();
-  for (const p of progress) {
-    const uid = String(p.userId);
-    const byQuestion = progressByUser.get(uid) ?? new Map();
-    byQuestion.set(String(p.questionId), p);
-    progressByUser.set(uid, byQuestion);
-  }
+  const questionIds = questions.map((q) => q._id);
+  const progress =
+    questionIds.length > 0
+      ? await QuestionProgress.find({
+          userId,
+          questionId: { $in: questionIds },
+        }).lean()
+      : [];
 
-  const members = memberIds.map((userId) => {
-    const byQuestion = progressByUser.get(userId) ?? new Map();
-    const memberQuestions = questions.map((q) => {
-      const p = byQuestion.get(String(q._id));
-      return {
-        _id: String(q._id),
-        practiceDate: q.practiceDate ?? q.createdAt,
-        createdAt: q.createdAt,
-        status: normalizeQuestionStatus(p?.status ?? "not_started"),
-        lastPracticed: p?.lastPracticed,
-        pointsAwarded: p?.pointsAwarded,
-        firstCompletedAt: p?.firstCompletedAt,
-      };
-    });
-    return buildMemberGamification(userId, userMap.get(userId) ?? "Unknown", memberQuestions);
+  const subjectMap = new Map(subjects.map((s) => [String(s._id), s]));
+  const progressMap = new Map(progress.map((p) => [String(p.questionId), p]));
+
+  return questions.map((q) => {
+    const base = serializeDoc(q);
+    const subject = subjectMap.get(String(q.subjectId));
+    const p = progressMap.get(String(q._id));
+    const practiceDate = (q.practiceDate ?? q.createdAt).toISOString();
+    return {
+      ...base,
+      practiceDate,
+      subjectName: subject?.name ?? "",
+      trackLabel: subject
+        ? formatSubjectTrack({
+            name: subject.name,
+            totalQuestions: subject.totalQuestions ?? 0,
+            contentUnit: subject.contentUnit ?? "questions",
+          })
+        : "",
+      status: normalizeQuestionStatus(p?.status ?? "not_started"),
+      confidence: p?.confidence ?? "weak",
+      lastPracticed: p?.lastPracticed?.toISOString(),
+      notes: p?.notes,
+    };
   });
-
-  return buildGroupGamification(members);
 }
 
 function mapTodayQuestion(

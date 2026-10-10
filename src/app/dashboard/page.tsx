@@ -30,9 +30,11 @@ export default function DashboardPage() {
   const [error, setError] = useState("");
   const [pointBurst, setPointBurst] = useState<QuestionPointBurst | null>(null);
 
+  const activeGroupId = user?.activeGroupId;
+
   const load = useCallback(async (silent = false) => {
-    if (!user) return;
-    if (!user.activeGroupId) {
+    if (!user?._id) return;
+    if (!activeGroupId) {
       setInitialLoad(false);
       setRefreshing(false);
       return;
@@ -56,7 +58,7 @@ export default function DashboardPage() {
       setInitialLoad(false);
       setRefreshing(false);
     }
-  }, [user]);
+  }, [user?._id, activeGroupId, refreshUser]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -108,7 +110,7 @@ export default function DashboardPage() {
     }
   };
 
-  if (initialLoad && !data && user?.activeGroupId) return <DashboardSkeleton />;
+  if (initialLoad && user?.activeGroupId) return <DashboardSkeleton />;
   if (user && !user.activeGroupId) {
     return (
       <div className="space-y-6">

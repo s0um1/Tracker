@@ -9,14 +9,15 @@ import Chip from "@/components/ui/Chip";
 import Modal from "@/components/ui/Modal";
 import MotivationBanner from "@/components/dashboard/MotivationBanner";
 import {
-  TaskListSkeleton,
-  QuestionListSkeleton,
+  QuestionsPageSkeleton,
   ErrorState,
   EmptyState,
 } from "@/components/ui/StateViews";
 import QuestionListView, { type QuestionListItem } from "@/components/questions/QuestionListView";
 import {
   formatSubjectTrack,
+  joinQuestionFields,
+  splitQuestionFields,
   toDateInputValue,
   QUESTION_DATE_PERIODS,
   normalizeQuestionStatus,
@@ -29,7 +30,8 @@ import {
   triggerQuestionPointsBurst,
   type QuestionPointBurst,
 } from "@/lib/question-points-burst";
-import type { ContentScope, PracticeQuestion, QuestionStatus, Subject } from "@/types";
+import { canManageGroup } from "@/lib/group-roles";
+import type { ContentScope, GroupRole, PracticeQuestion, QuestionStatus, Subject } from "@/types";
 
 type QuestionWithSubject = PracticeQuestion & { subjectName: string; trackLabel: string };
 
@@ -58,11 +60,13 @@ export default function QuestionsPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [content, setContent] = useState("");
+  const [questionTitle, setQuestionTitle] = useState("");
+  const [questionDescription, setQuestionDescription] = useState("");
   const [subjectId, setSubjectId] = useState("");
   const [link, setLink] = useState("");
   const [practiceDate, setPracticeDate] = useState(toDateInputValue());
   const [scope, setScope] = useState<ContentScope>("group");
+  const [canAddGroupQuestions, setCanAddGroupQuestions] = useState(false);
 
   const groupSubjects = useMemo(
     () => subjects.filter((s) => s.scope === "group"),
@@ -74,31 +78,36 @@ export default function QuestionsPage() {
   );
   const modalSubjects = scope === "group" ? groupSubjects : personalSubjects;
 
+  const activeGroupId = user?.activeGroupId;
+
   const load = useCallback(async () => {
-    if (!user) return;
-    if (!user.activeGroupId) {
+    if (!activeGroupId) {
       setLoading(false);
       setInitialLoad(false);
       return;
     }
     setLoading(true);
     try {
-      const questionUrl = `/api/practice-questions?groupId=${user.activeGroupId}&scope=all&page=${page}&limit=${PAGE_SIZE}&period=${datePeriod}&sortBy=${sortBy}&sortDir=${sortDir}`;
+      const questionUrl = `/api/practice-questions?groupId=${activeGroupId}&scope=all&page=${page}&limit=${PAGE_SIZE}&period=${datePeriod}&sortBy=${sortBy}&sortDir=${sortDir}`;
 
-      const [questionData, subjectData] = await Promise.all([
+      const [questionData, subjectData, groupHeader] = await Promise.all([
         apiGet<PagedQuestions>(questionUrl),
-        apiGet<Subject[]>(`/api/subjects?groupId=${user.activeGroupId}`),
+        apiGet<Subject[]>(`/api/subjects?groupId=${activeGroupId}&minimal=1`),
+        apiGet<{ myRole: GroupRole | null }>(
+          `/api/groups/${activeGroupId}?view=header`
+        ),
       ]);
       setQuestions(questionData.items);
       setTotal(questionData.total);
       setSubjects(subjectData);
+      setCanAddGroupQuestions(canManageGroup(groupHeader.myRole));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load questions");
     } finally {
       setLoading(false);
       setInitialLoad(false);
     }
-  }, [user, page, datePeriod, sortBy, sortDir]);
+  }, [activeGroupId, page, datePeriod, sortBy, sortDir]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -112,6 +121,12 @@ export default function QuestionsPage() {
       setSubjectId(available[0]._id);
     }
   }, [scope, groupSubjects, personalSubjects, subjectId]);
+
+  useEffect(() => {
+    if (!canAddGroupQuestions && scope === "group") {
+      setScope("personal");
+    }
+  }, [canAddGroupQuestions, scope]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -127,11 +142,16 @@ export default function QuestionsPage() {
 
   const resetForm = () => {
     setEditingId(null);
-    setContent("");
+    setQuestionTitle("");
+    setQuestionDescription("");
     setLink("");
     setPracticeDate(toDateInputValue());
-    setScope("group");
-    setSubjectId(groupSubjects[0]?._id ?? personalSubjects[0]?._id ?? "");
+    setScope(canAddGroupQuestions ? "group" : "personal");
+    setSubjectId(
+      (canAddGroupQuestions ? groupSubjects[0] : personalSubjects[0])?._id ??
+        personalSubjects[0]?._id ??
+        ""
+    );
   };
 
   const openCreateModal = () => {
@@ -143,7 +163,9 @@ export default function QuestionsPage() {
     const full = questions.find((item) => item._id === q._id);
     if (!full) return;
     setEditingId(full._id);
-    setContent(full.content);
+    const parts = splitQuestionFields(full.content);
+    setQuestionTitle(parts.title);
+    setQuestionDescription(parts.description);
     setLink(full.link ?? "");
     setPracticeDate(toDateInputValue(full.practiceDate ?? full.createdAt));
     setScope(full.scope);
@@ -157,16 +179,19 @@ export default function QuestionsPage() {
   };
 
   const saveQuestion = async () => {
-    if (!content.trim() || !subjectId || !user?.activeGroupId) return;
+    if (!questionTitle.trim() || !subjectId || !user?.activeGroupId) return;
+    const payload = {
+      title: questionTitle.trim(),
+      description: questionDescription.trim(),
+      link: link.trim() || undefined,
+      subjectId,
+      practiceDate,
+    };
+    const mergedContent = joinQuestionFields(payload.title, payload.description);
     setSaving(true);
     try {
       if (editingId) {
-        const updated = await apiPatch<QuestionWithSubject>(`/api/practice-questions/${editingId}`, {
-          content,
-          link: link.trim() || undefined,
-          subjectId,
-          practiceDate,
-        });
+        const updated = await apiPatch<QuestionWithSubject>(`/api/practice-questions/${editingId}`, payload);
         const subject = subjects.find((s) => s._id === subjectId);
         setQuestions((prev) =>
           prev.map((q) =>
@@ -174,8 +199,8 @@ export default function QuestionsPage() {
               ? {
                   ...q,
                   ...updated,
-                  content,
-                  link: link.trim() || undefined,
+                  content: mergedContent,
+                  link: payload.link,
                   subjectId,
                   practiceDate,
                   subjectName: subject?.name ?? q.subjectName,
@@ -188,11 +213,8 @@ export default function QuestionsPage() {
       } else {
         await apiPost("/api/practice-questions", {
           groupId: user.activeGroupId,
-          subjectId,
-          content,
-          link: link.trim() || undefined,
           scope,
-          practiceDate,
+          ...payload,
         });
         toast.success("Question added");
         if (page !== 1) setPage(1);
@@ -266,16 +288,7 @@ export default function QuestionsPage() {
   }
 
   if (initialLoad && loading) {
-    return (
-      <div className="space-y-6">
-        <div className="space-y-2">
-          <div className="h-8 w-40 animate-pulse rounded-lg bg-[var(--surface-muted)]" />
-          <div className="h-4 w-64 animate-pulse rounded-lg bg-[var(--surface-muted)]" />
-        </div>
-        <TaskListSkeleton rows={3} />
-        <QuestionListSkeleton />
-      </div>
-    );
+    return <QuestionsPageSkeleton />;
   }
   if (error) return <ErrorState message={error} onRetry={load} />;
 
@@ -376,32 +389,43 @@ export default function QuestionsPage() {
         title={editingId ? "Edit Question" : "Add Question"}
       >
         <div className="space-y-4">
-          {!editingId && (
-            <div>
-              <label className="text-sm font-medium">Visibility</label>
-              <select
-                value={scope}
-                onChange={(e) => setScope(e.target.value as ContentScope)}
-                className="mt-1 w-full rounded-lg border border-[var(--input-border)] px-4 py-2 text-sm dark:border-[var(--input-border)] dark:bg-[var(--input-bg)]"
-              >
-                <option value="group">Group — shared with everyone</option>
-                <option value="personal">Personal — only you</option>
-              </select>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
+            <div className="min-w-0 flex-1">
+              {!editingId ? (
+                <>
+                  <label className="text-sm font-medium">Visibility</label>
+                  {canAddGroupQuestions ? (
+                    <select
+                      value={scope}
+                      onChange={(e) => setScope(e.target.value as ContentScope)}
+                      className="mt-1 w-full rounded-lg border border-[var(--input-border)] px-4 py-2 text-sm dark:border-[var(--input-border)] dark:bg-[var(--input-bg)]"
+                    >
+                      <option value="group">Group — shared with everyone</option>
+                      <option value="personal">Personal — only you</option>
+                    </select>
+                  ) : (
+                    <p className="mt-1 text-sm text-[var(--muted)]">
+                      Personal — only you (group questions require admin or co-admin)
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p className="text-sm text-[var(--muted)] sm:pb-2">
+                  {scope === "group"
+                    ? "Group question — visible to everyone"
+                    : "Personal question — only you"}
+                </p>
+              )}
             </div>
-          )}
-          {editingId && (
-            <p className="text-sm text-[var(--muted)]">
-              {scope === "group" ? "Group question — visible to everyone" : "Personal question — only you"}
-            </p>
-          )}
-          <div>
-            <label className="text-sm font-medium">Practice date</label>
-            <input
-              type="date"
-              value={practiceDate}
-              onChange={(e) => setPracticeDate(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-[var(--input-border)] px-4 py-2 text-sm dark:border-[var(--input-border)] dark:bg-[var(--input-bg)]"
-            />
+            <div className="w-full shrink-0 sm:w-[11.5rem]">
+              <label className="text-sm font-medium">Practice date</label>
+              <input
+                type="date"
+                value={practiceDate}
+                onChange={(e) => setPracticeDate(e.target.value)}
+                className="input-date-end mt-1 w-full rounded-lg border border-[var(--input-border)] px-4 py-2 text-sm dark:border-[var(--input-border)] dark:bg-[var(--input-bg)]"
+              />
+            </div>
           </div>
           {(editingId ? subjects.filter((s) => s.scope === scope) : modalSubjects).length === 0 ? (
             <p className="text-sm text-[var(--muted)]">
@@ -425,11 +449,21 @@ export default function QuestionsPage() {
             </div>
           )}
           <div>
-            <label className="text-sm font-medium">Question</label>
+            <label className="text-sm font-medium">Title</label>
+            <input
+              type="text"
+              value={questionTitle}
+              onChange={(e) => setQuestionTitle(e.target.value)}
+              placeholder="TCP vs UDP"
+              className="mt-1 w-full rounded-lg border border-[var(--input-border)] px-4 py-2 text-sm dark:border-[var(--input-border)] dark:bg-[var(--input-bg)]"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium">Description</label>
             <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder="What is the difference between TCP and UDP?"
+              value={questionDescription}
+              onChange={(e) => setQuestionDescription(e.target.value)}
+              placeholder="Explain connection-oriented vs connectionless delivery, use cases, and trade-offs."
               rows={3}
               className="mt-1 w-full rounded-lg border border-[var(--input-border)] px-4 py-2 text-sm dark:border-[var(--input-border)] dark:bg-[var(--input-bg)]"
             />
@@ -454,7 +488,7 @@ export default function QuestionsPage() {
             className="w-full"
             disabled={
               saving ||
-              !content.trim() ||
+              !questionTitle.trim() ||
               !subjectId ||
               (editingId
                 ? subjects.filter((s) => s.scope === scope).length === 0

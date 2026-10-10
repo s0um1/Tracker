@@ -7,7 +7,7 @@ import Card from "@/components/ui/Card";
 import Chip from "@/components/ui/Chip";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
-import { Skeleton, ErrorState, EmptyState } from "@/components/ui/StateViews";
+import { SubjectsGridSkeleton, SubjectsPageSkeleton, ErrorState, EmptyState } from "@/components/ui/StateViews";
 import ProgressBar from "@/components/ui/ProgressBar";
 import { ConfidenceBadge } from "@/components/ui/Badge";
 import { formatSubjectTrack } from "@/lib/utils";
@@ -18,6 +18,7 @@ export default function SubjectsPage() {
   const { user } = useUser();
   const [subjects, setSubjects] = useState<SubjectWithStats[]>([]);
   const [loading, setLoading] = useState(true);
+  const [initialLoad, setInitialLoad] = useState(true);
   const [error, setError] = useState("");
   const [tab, setTab] = useState<ContentScope>("group");
   const [showModal, setShowModal] = useState(false);
@@ -28,7 +29,11 @@ export default function SubjectsPage() {
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
-    if (!user?.activeGroupId && tab === "group") return;
+    if (!user?.activeGroupId && tab === "group") {
+      setLoading(false);
+      setSubjects([]);
+      return;
+    }
     setLoading(true);
     try {
       const url =
@@ -41,6 +46,7 @@ export default function SubjectsPage() {
       setError(err instanceof Error ? err.message : "Failed to load subjects");
     } finally {
       setLoading(false);
+      setInitialLoad(false);
     }
   }, [user, tab]);
 
@@ -131,6 +137,10 @@ export default function SubjectsPage() {
     }
   };
 
+  if (initialLoad && loading) {
+    return <SubjectsPageSkeleton />;
+  }
+
   if (error && subjects.length === 0) {
     return <ErrorState message={error} onRetry={load} />;
   }
@@ -142,7 +152,7 @@ export default function SubjectsPage() {
           <h1 className="text-2xl font-bold text-[var(--foreground)]">Tracks</h1>
           <p className="mt-1 text-sm text-[var(--muted)]">
             {tab === "group"
-              ? "Group prep tracks like DSA — 150 questions."
+              ? "Shared tracks for your group’s question bank."
               : "Your private tracks for solo practice."}
           </p>
         </div>
@@ -166,21 +176,13 @@ export default function SubjectsPage() {
       </div>
 
       {loading ? (
-        <div className="grid gap-4 sm:grid-cols-2">
-          {Array.from({ length: 4 }, (_, i) => (
-            <div key={i} className="rounded-2xl border border-[var(--border)] p-5 space-y-3">
-              <Skeleton className="h-6 w-32" />
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-2 w-full" />
-            </div>
-          ))}
-        </div>
+        <SubjectsGridSkeleton />
       ) : subjects.length === 0 ? (
         <EmptyState
           title={tab === "group" ? "No group tracks yet" : "No personal tracks yet"}
           description={
             tab === "group"
-              ? "Add tracks like DSA — 150 Questions for your group."
+              ? "Add a track for your group to organize questions."
               : "Add personal tracks for your question bank."
           }
           action={<Button onClick={openCreateModal}>Add Track</Button>}
@@ -232,16 +234,13 @@ export default function SubjectsPage() {
         }
       >
         <div className="space-y-4">
-          <p className="text-sm text-[var(--muted)]">
-            e.g. DSA with a target of 150 questions.
-          </p>
           <div>
             <label className="text-sm font-medium">Track name</label>
             <input
               type="text"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              placeholder="Track name (e.g. DSA)"
+              placeholder="Track name"
               className="mt-1 w-full rounded-lg border border-[var(--input-border)] px-4 py-2.5 text-sm dark:border-[var(--input-border)] dark:bg-[var(--input-bg)]"
             />
           </div>
@@ -252,7 +251,8 @@ export default function SubjectsPage() {
               min={0}
               value={newTotalQuestions}
               onChange={(e) => setNewTotalQuestions(e.target.value)}
-              placeholder="Target questions (e.g. 150)"
+              onWheel={(e) => e.currentTarget.blur()}
+              placeholder="Target count (optional)"
               className="mt-1 w-full rounded-lg border border-[var(--input-border)] px-4 py-2.5 text-sm dark:border-[var(--input-border)] dark:bg-[var(--input-bg)]"
             />
           </div>

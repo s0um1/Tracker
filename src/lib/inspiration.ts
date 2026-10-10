@@ -60,7 +60,7 @@ function ctcMessages(target: number): InspirationMessage[] {
   return [
     { text: `${target} LPA doesn't chase people who scroll LinkedIn all day.`, tone: "ctc" },
     { text: `You're not grinding for your manager. You're grinding for ${target} LPA.`, tone: "ctc" },
-    { text: `Every hour of focused prep is an investment toward ₹${monthly}K/month.`, tone: "ctc" },
+    { text: `Every hour of focused prep is an investment toward ₹${monthly}K/mo.`, tone: "ctc" },
     { text: `The offer letter at ${target} LPA is written in the topics you revise today.`, tone: "ctc" },
     { text: `Rejections at 12 LPA hurt less when you're prepared for ${target}.`, tone: "ctc" },
     { text: `${target} LPA is not a lottery ticket. It's a skill stack you're building.`, tone: "ctc" },
@@ -73,7 +73,7 @@ function ctcMessages(target: number): InspirationMessage[] {
     { text: `The gap between your current CTC and ${target} LPA closes with deliberate practice.`, tone: "ctc" },
     { text: `${target} LPA means negotiating from strength. Build that strength now.`, tone: "ctc" },
     { text: `Set your CTC target, then let every study session answer: "Am I worth ${target}?"`, tone: "ctc" },
-    { text: `₹${monthly}K/month post-tax won't come from hope. It comes from readiness.`, tone: "ctc" },
+    { text: `₹${monthly}K/mo post-tax won't come from hope. It comes from readiness.`, tone: "ctc" },
   ];
 }
 

@@ -6,7 +6,7 @@ import { apiGet, apiPatch, apiPost, getErrorMessage } from "@/lib/api";
 import Card, { CardHeader } from "@/components/ui/Card";
 import Link from "next/link";
 import Button from "@/components/ui/Button";
-import { LoadingState, ErrorState, EmptyState } from "@/components/ui/StateViews";
+import { InterviewPlanSkeleton, ErrorState, EmptyState } from "@/components/ui/StateViews";
 import { formatDate } from "@/lib/utils";
 import toast from "react-hot-toast";
 import type { PreparationPlan } from "@/types";
@@ -78,7 +78,7 @@ export default function InterviewPlanPage() {
     );
   }
 
-  if (loading) return <LoadingState />;
+  if (loading) return <InterviewPlanSkeleton />;
   if (error) return <ErrorState message={error} onRetry={load} />;
   if (!plan) return null;
 

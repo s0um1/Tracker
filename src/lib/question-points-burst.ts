@@ -7,7 +7,7 @@ export function triggerQuestionPointsBurst(
   id: string,
   pointsEarnedNow?: number
 ) {
-  if (pointsEarnedNow == null) return;
+  if (pointsEarnedNow == null || pointsEarnedNow <= 0) return;
   setBurst({ id, points: pointsEarnedNow });
   window.setTimeout(() => {
     setBurst((current) => (current?.id === id ? null : current));

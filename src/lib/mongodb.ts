@@ -39,7 +39,13 @@ export async function connectToDatabase(): Promise<typeof mongoose> {
     if (!cached.conn) {
       cached.conn = await cached.promise;
     }
-    await runIndexMigration();
+    // ponytail: indexes sync in background — avoids blocking every API on cold start
+    void runIndexMigration().catch((err) => {
+      console.error(
+        "[mongodb] index migration failed:",
+        err instanceof Error ? err.message : err
+      );
+    });
   } catch (err) {
     cached.promise = null;
     cached.conn = null;

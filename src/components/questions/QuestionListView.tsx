@@ -1,9 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import clsx from "clsx";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, Eye } from "lucide-react";
 import Button from "@/components/ui/Button";
-import ExpandableQuestionContent from "@/components/questions/ExpandableQuestionContent";
+import QuestionPreviewModal from "@/components/questions/QuestionPreviewModal";
 import QuestionPointsBurst from "@/components/questions/QuestionPointsBurst";
 import QuestionScopeChip from "@/components/questions/QuestionScopeChip";
 import QuestionStatusSelect from "@/components/questions/QuestionStatusSelect";
@@ -11,6 +12,7 @@ import type { QuestionPointBurst } from "@/lib/question-points-burst";
 import {
   formatDate,
   questionRowVars,
+  splitQuestionFields,
   type QuestionSortDir,
   type QuestionSortField,
 } from "@/lib/utils";
@@ -99,10 +101,14 @@ export default function QuestionListView({
   onSort?: (field: QuestionSortField) => void;
   loading?: boolean;
 }) {
-  const scopeCol = showScope ? "w-[10%]" : "";
-  const questionCol = showScope ? "w-[30%]" : "w-[34%]";
-  const trackCol = showScope ? "w-[14%]" : "w-[18%]";
-  const actionsCol = showActions ? "w-[12%]" : "";
+  const questionCol = "min-w-[14rem] lg:min-w-[18rem]";
+  const scopeCol = "min-w-[6.5rem]";
+  const statusCol = "min-w-[10rem]";
+  const dateCol = "min-w-[8.5rem]";
+  const trackCol = "min-w-[7rem]";
+  const viewCol = "w-12";
+  const actionsCol = "min-w-[9rem]";
+  const [preview, setPreview] = useState<QuestionListItem | null>(null);
 
   return (
     <>
@@ -117,14 +123,26 @@ export default function QuestionListView({
             )}
           >
             <div className="flex items-start justify-between gap-3">
-              <ExpandableQuestionContent content={q.content} className="min-w-0 flex-1" />
-              <div className="relative shrink-0">
+              <p className="min-w-0 flex-1 text-sm font-medium line-clamp-2 text-[var(--foreground)]">
+                {splitQuestionFields(q.content).title}
+              </p>
+              <div className="flex shrink-0 items-start gap-1">
+                <button
+                  type="button"
+                  aria-label="View question"
+                  onClick={() => setPreview(q)}
+                  className="rounded-lg p-1.5 text-[var(--muted)] transition-colors hover:bg-[var(--surface-muted)] hover:text-brand"
+                >
+                  <Eye className="h-4 w-4" aria-hidden />
+                </button>
+              <div className="relative">
                 {pointBurst?.id === q._id && <QuestionPointsBurst points={pointBurst.points} />}
                 <QuestionStatusSelect
                   value={q.status}
                   onChange={(status) => onStatusChange(q._id, status)}
                   className="shrink-0"
                 />
+              </div>
               </div>
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--muted)]">
@@ -133,16 +151,6 @@ export default function QuestionListView({
               <span className="rounded-md bg-[var(--surface-muted)] px-1.5 py-0.5">
                 {q.trackLabel || q.subjectName}
               </span>
-              {q.link && (
-                <a
-                  href={q.link}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-brand hover:underline"
-                >
-                  Open link
-                </a>
-              )}
             </div>
             {showActions && (onEdit || onDelete) && (
               <div className="mt-3 flex justify-end gap-1">
@@ -164,22 +172,32 @@ export default function QuestionListView({
 
       <div
         className={clsx(
-          "hidden overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] lg:block",
+          "hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] lg:block",
           loading && "opacity-60"
         )}
       >
-        <table className="w-full table-fixed border-separate border-spacing-y-1 text-left text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[44rem] border-separate border-spacing-y-1 text-left text-sm">
           <thead className="bg-[var(--surface-muted)] text-xs uppercase tracking-wide text-[var(--muted)]">
             <tr>
               <th className={`${questionCol} px-4 py-3 font-semibold`}>Question</th>
-              {showScope && <th className={`${scopeCol} px-4 py-3 font-semibold`}>Scope</th>}
+              {showScope && (
+                <SortableHeader
+                  label="Scope"
+                  field="scope"
+                  sortBy={sortBy}
+                  sortDir={sortDir}
+                  onSort={onSort}
+                  className={`${scopeCol} px-4 py-3`}
+                />
+              )}
               <SortableHeader
                 label="Status"
                 field="status"
                 sortBy={sortBy}
                 sortDir={sortDir}
                 onSort={onSort}
-                className="w-[14%] px-4 py-3"
+                className={`${statusCol} px-4 py-3`}
               />
               <SortableHeader
                 label="Date"
@@ -187,7 +205,7 @@ export default function QuestionListView({
                 sortBy={sortBy}
                 sortDir={sortDir}
                 onSort={onSort}
-                className="w-[12%] px-4 py-3"
+                className={`${dateCol} px-4 py-3`}
               />
               <SortableHeader
                 label="Track"
@@ -197,7 +215,7 @@ export default function QuestionListView({
                 onSort={onSort}
                 className={`${trackCol} px-4 py-3`}
               />
-              <th className="w-[8%] px-4 py-3 font-semibold">Link</th>
+              <th className={`${viewCol} px-2 py-3 font-semibold`} aria-label="View" />
               {showActions && <th className={`${actionsCol} px-4 py-3 font-semibold`} />}
             </tr>
           </thead>
@@ -212,48 +230,46 @@ export default function QuestionListView({
                 style={questionRowVars(q.status)}
               >
                 <td className="qs-row-cell px-4 py-3.5 text-[var(--foreground)]">
-                  <ExpandableQuestionContent
-                    content={q.content}
-                    collapsedClassName="line-clamp-2"
-                    className="font-medium"
-                  />
+                  <p className="line-clamp-2 font-medium">
+                    {splitQuestionFields(q.content).title}
+                  </p>
                 </td>
                 {showScope && (
                   <td className="qs-row-cell px-4 py-3.5">
                     {q.scope ? <QuestionScopeChip scope={q.scope} /> : "—"}
                   </td>
                 )}
-                <td className="qs-row-cell px-4 py-3.5">
-                  <div className="relative inline-block w-full max-w-[10rem]">
-                    {pointBurst?.id === q._id && <QuestionPointsBurst points={pointBurst.points} />}
+                <td className={`qs-row-cell ${statusCol} px-4 py-3.5`}>
+                  <div className="relative inline-block min-w-[9rem]">
+                    {pointBurst?.id === q._id && (
+                      <div className="pointer-events-none absolute left-1/2 top-0 z-10 -translate-x-1/2">
+                        <QuestionPointsBurst points={pointBurst.points} />
+                      </div>
+                    )}
                     <QuestionStatusSelect
                       value={q.status}
                       onChange={(status) => onStatusChange(q._id, status)}
-                      className="w-full"
+                      className="relative z-0 w-full"
                     />
                   </div>
                 </td>
-                <td className="qs-row-cell truncate px-4 py-3.5 text-[var(--muted)]">
+                <td className={`qs-row-cell whitespace-nowrap px-4 py-3.5 text-[var(--muted)] ${dateCol}`}>
                   {questionDateLabel(q)}
                 </td>
-                <td className="qs-row-cell truncate px-4 py-3.5">
+                <td className={`qs-row-cell whitespace-nowrap px-4 py-3.5 ${trackCol}`}>
                   <span className="rounded-md bg-[var(--surface-muted)] px-2 py-0.5 text-xs text-[var(--muted)]">
                     {q.trackLabel || q.subjectName}
                   </span>
                 </td>
-                <td className="qs-row-cell px-4 py-3.5">
-                  {q.link ? (
-                    <a
-                      href={q.link}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-brand hover:underline"
-                    >
-                      Open
-                    </a>
-                  ) : (
-                    <span className="text-[var(--muted)]">—</span>
-                  )}
+                <td className="qs-row-cell px-2 py-3.5 text-center">
+                  <button
+                    type="button"
+                    aria-label="View question"
+                    onClick={() => setPreview(q)}
+                    className="rounded-lg p-1.5 text-[var(--muted)] transition-colors hover:bg-[var(--surface-muted)] hover:text-brand"
+                  >
+                    <Eye className="h-4 w-4" aria-hidden />
+                  </button>
                 </td>
                 {showActions && (
                   <td className="qs-row-cell px-4 py-3.5 text-right">
@@ -275,7 +291,15 @@ export default function QuestionListView({
             ))}
           </tbody>
         </table>
+        </div>
       </div>
+
+      <QuestionPreviewModal
+        open={preview !== null}
+        onClose={() => setPreview(null)}
+        content={preview?.content ?? ""}
+        link={preview?.link}
+      />
     </>
   );
 }

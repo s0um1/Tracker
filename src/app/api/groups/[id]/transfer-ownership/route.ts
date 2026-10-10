@@ -1,7 +1,7 @@
 import { connectToDatabase } from "@/lib/mongodb";
 import { requireAuthUserId, unauthorized } from "@/lib/api-auth";
 import { jsonOk, jsonError } from "@/lib/utils";
-import { isGroupMember, serializeDoc } from "@/lib/services";
+import { serializeDoc } from "@/lib/services";
 import Group from "@/models/Group";
 
 export async function POST(
@@ -16,11 +16,11 @@ export async function POST(
     const newOwnerId = String(body.newOwnerId ?? "").trim();
 
     if (!newOwnerId) return jsonError("newOwnerId is required", 400);
-    if (newOwnerId === userId) return jsonError("You are already the owner", 400);
+    if (newOwnerId === userId) return jsonError("You are already the group admin", 400);
 
     const group = await Group.findById(id);
     if (!group) return jsonError("Group not found", 404);
-    if (String(group.ownerId) !== userId) return jsonError("Only the owner can transfer ownership", 403);
+    if (String(group.ownerId) !== userId) return jsonError("Only the group admin can transfer the admin role", 403);
 
     const newOwnerMember = group.members.find((m) => String(m.userId) === newOwnerId);
     if (!newOwnerMember) return jsonError("New owner must be a group member", 400);

@@ -13,14 +13,22 @@ import {
   type QuestionDatePeriod,
   type QuestionSortField,
   type QuestionSortDir,
+  resolveQuestionBody,
 } from "@/lib/utils";
-import { serializeDoc, seedQuestionProgressForMembers, isGroupMember } from "@/lib/services";
+import {
+  serializeDoc,
+  seedQuestionProgressForMembers,
+  isGroupMember,
+  canManageGroup,
+  invalidateGroupInsights,
+} from "@/lib/services";
+import mongoose from "mongoose";
 import PracticeQuestion from "@/models/PracticeQuestion";
 import QuestionProgress from "@/models/QuestionProgress";
 import Subject from "@/models/Subject";
 import Topic from "@/models/Topic";
 import Group from "@/models/Group";
-import type { ContentScope } from "@/types";
+import type { ContentScope, ContentUnit } from "@/types";
 
 function dayRange(dateStr: string) {
   const start = parseDateInput(dateStr);
@@ -84,27 +92,24 @@ export async function GET(request: Request) {
 
     const sortByParam = searchParams.get("sortBy");
     const sortBy: QuestionSortField =
-      sortByParam === "status" || sortByParam === "track" || sortByParam === "date"
+      sortByParam === "status" ||
+      sortByParam === "track" ||
+      sortByParam === "date" ||
+      sortByParam === "scope"
         ? sortByParam
         : "date";
     const sortDir: QuestionSortDir = searchParams.get("sortDir") === "asc" ? "asc" : "desc";
     const mongoDir = sortDir === "asc" ? 1 : -1;
 
-    const [subjects, progress, total] = await Promise.all([
-      Subject.find({
-        $or: [
-          { groupId, scope: "group", isActive: true },
-          { userId, scope: "personal", isActive: true },
-        ],
-      }).lean(),
-      QuestionProgress.find({ userId }).lean(),
-      paginate ? PracticeQuestion.countDocuments(questionFilter) : Promise.resolve(0),
-    ]);
+    const subjectQuery = Subject.find({
+      $or: [
+        { groupId, scope: "group", isActive: true },
+        { userId, scope: "personal", isActive: true },
+      ],
+    }).lean();
 
-    const subjectMap = new Map(subjects.map((s) => [String(s._id), s]));
-    const progressMap = new Map(progress.map((p) => [String(p.questionId), p]));
-
-    const mapQuestion = (q: {
+    const mapQuestion = (
+      q: {
       _id: unknown;
       scope: string;
       subjectId: unknown;
@@ -114,7 +119,10 @@ export async function GET(request: Request) {
       confidence?: string;
       lastPracticed?: Date;
       notes?: string;
-    }) => {
+      },
+      subjectMap: Map<string, { name: string; totalQuestions?: number; contentUnit?: ContentUnit }>,
+      progressMap: Map<string, { status?: string; confidence?: string; lastPracticed?: Date; notes?: string }>
+    ) => {
       const base = serializeDoc(q);
       const practiceDate = (q.practiceDate ?? q.createdAt).toISOString();
       const subject = subjectMap.get(String(q.subjectId));
@@ -150,19 +158,57 @@ export async function GET(request: Request) {
       };
     };
 
+    async function progressForQuestions(
+      questions: { _id: unknown; scope: string }[]
+    ) {
+      const groupIds = questions
+        .filter((q) => q.scope === "group")
+        .map((q) => q._id as mongoose.Types.ObjectId);
+      if (groupIds.length === 0) return new Map();
+      const progressRows = await QuestionProgress.find({
+        userId,
+        questionId: { $in: groupIds },
+      }).lean();
+      return new Map(progressRows.map((p) => [String(p.questionId), p]));
+    }
+
+    const questionFields =
+      "_id scope subjectId topicId practiceDate createdAt status confidence lastPracticed notes content link difficulty userId groupId";
+
+    const questionsForPage = async () => {
+      let query = PracticeQuestion.find(questionFilter)
+        .select(questionFields)
+        .sort({
+          practiceDate: mongoDir,
+          createdAt: mongoDir,
+        });
+      if (paginate) query = query.skip(skip).limit(limit);
+      return query.lean();
+    };
+
     let result;
+    let total = 0;
     if (sortBy === "date") {
-      let questionQuery = PracticeQuestion.find(questionFilter).sort({
-        practiceDate: mongoDir,
-        createdAt: mongoDir,
-      });
-      if (paginate) questionQuery = questionQuery.skip(skip).limit(limit);
-      const questions = await questionQuery.lean();
-      result = questions.map(mapQuestion);
+      const [subjects, count, questions] = await Promise.all([
+        subjectQuery,
+        paginate ? PracticeQuestion.countDocuments(questionFilter) : Promise.resolve(0),
+        questionsForPage(),
+      ]);
+      total = count;
+      const subjectMap = new Map(subjects.map((s) => [String(s._id), s]));
+      const progressMap = await progressForQuestions(questions);
+      result = questions.map((q) => mapQuestion(q, subjectMap, progressMap));
     } else {
-      const questions = await PracticeQuestion.find(questionFilter).lean();
+      const [subjects, count, questions] = await Promise.all([
+        subjectQuery,
+        paginate ? PracticeQuestion.countDocuments(questionFilter) : Promise.resolve(0),
+        PracticeQuestion.find(questionFilter).select(questionFields).lean(),
+      ]);
+      total = count;
+      const subjectMap = new Map(subjects.map((s) => [String(s._id), s]));
+      const progressMap = await progressForQuestions(questions);
       result = questions
-        .map(mapQuestion)
+        .map((q) => mapQuestion(q, subjectMap, progressMap))
         .sort((a, b) => compareQuestions(a, b, sortBy, sortDir));
       if (paginate) result = result.slice(skip, skip + limit);
     }
@@ -196,14 +242,20 @@ export async function POST(request: Request) {
     if (!groupId || !subjectId) {
       return jsonError("groupId and subjectId are required");
     }
-    if (!content?.trim()) return jsonError("Question content is required");
+    const resolved = resolveQuestionBody({ content, title: body.title, description: body.description });
+    if ("error" in resolved) return jsonError(resolved.error);
+    const questionContent = resolved.content;
     if (scope !== "group" && scope !== "personal") {
       return jsonError("scope must be group or personal");
     }
 
     const group = await Group.findById(groupId).lean();
-    if (!group || !isGroupMember(group, userId)) {
+    const role = group ? isGroupMember(group, userId) : null;
+    if (!group || !role) {
       return jsonError("Not a member of this group", 403);
+    }
+    if (scope === "group" && !canManageGroup(role)) {
+      return jsonError("Only admins and co-admins can add group questions", 403);
     }
 
     const subject = await Subject.findById(subjectId).lean();
@@ -236,13 +288,14 @@ export async function POST(request: Request) {
       subjectId,
       topicId: topicId || undefined,
       practiceDate: parsedPracticeDate,
-      content: content.trim(),
+      content: questionContent,
       link: link?.trim(),
       difficulty: difficulty ?? "medium",
     });
 
     if (scope === "group") {
       await seedQuestionProgressForMembers(String(question._id), groupId);
+      invalidateGroupInsights(groupId);
     }
 
     return jsonOk(serializeDoc(question), 201);

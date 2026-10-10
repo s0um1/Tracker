@@ -10,13 +10,18 @@ import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
 import PageHeader from "@/components/ui/PageHeader";
 import { Input } from "@/components/ui/Input";
-import { LoadingState, ErrorState, EmptyState } from "@/components/ui/StateViews";
+import { GroupsPageSkeleton, ErrorState, EmptyState } from "@/components/ui/StateViews";
 import InviteCodeBlock from "@/components/groups/InviteCodeBlock";
 import { formatDate, isGroupFull, JOIN_CODE_TTL_MINUTES, MAX_GROUP_MEMBERS } from "@/lib/utils";
 import toast from "react-hot-toast";
-import type { Group } from "@/types";
+import { canManageGroup, isGroupAdminRole } from "@/lib/group-roles";
+import type { Group, GroupRole } from "@/types";
 
-type GroupListItem = Group & { memberCount: number; subjects: string[] };
+type GroupListItem = Group & {
+  memberCount: number;
+  subjects: string[];
+  myRole?: GroupRole | null;
+};
 
 export default function GroupsPage() {
   const { user, refreshUser } = useUser();
@@ -31,9 +36,10 @@ export default function GroupsPage() {
   const [creating, setCreating] = useState(false);
   const [generatingGroupId, setGeneratingGroupId] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    if (!user) return;
-    setLoading(true);
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!user?._id) return;
+    const silent = opts?.silent ?? false;
+    if (!silent) setLoading(true);
     try {
       const data = await apiGet<GroupListItem[]>("/api/groups");
       setGroups(data);
@@ -41,9 +47,9 @@ export default function GroupsPage() {
     } catch (err) {
       setError(getErrorMessage(err, "Failed to load groups"));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  }, [user]);
+  }, [user?._id]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -55,7 +61,7 @@ export default function GroupsPage() {
       setShowJoin(false);
       setJoinCode("");
       await refreshUser();
-      load();
+      load({ silent: true });
     } catch (err) {
       toast.error(getErrorMessage(err, "Failed to join"));
     }
@@ -74,7 +80,7 @@ export default function GroupsPage() {
       setCreateName("");
       setCreateDescription("");
       await refreshUser();
-      load();
+      load({ silent: true });
     } catch (err) {
       toast.error(getErrorMessage(err, "Failed to create group"));
     } finally {
@@ -82,11 +88,12 @@ export default function GroupsPage() {
     }
   };
 
-  const generateInviteForGroup = async (groupId: string) => {
+  const generateInviteForGroup = async (groupId: string, opts?: { force?: boolean }) => {
     setGeneratingGroupId(groupId);
     try {
       const res = await apiPost<{ joinCode: string; joinCodeExpiresAt: string }>(
-        `/api/groups/${groupId}/regenerate-code`
+        `/api/groups/${groupId}/regenerate-code`,
+        opts?.force ? { force: true } : {}
       );
       setGroups((prev) =>
         prev.map((g) =>
@@ -103,7 +110,7 @@ export default function GroupsPage() {
     }
   };
 
-  if (loading) return <LoadingState />;
+  if (loading) return <GroupsPageSkeleton />;
   if (error) return <ErrorState message={error} onRetry={load} />;
 
   const headerActions = (
@@ -134,7 +141,8 @@ export default function GroupsPage() {
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           {groups.map((g) => {
-            const isOwner = String(g.ownerId) === user?._id;
+            const isGroupAdmin = isGroupAdminRole(g.myRole);
+            const canGenerateInvite = canManageGroup(g.myRole);
             const isActive = g._id === user?.activeGroupId;
             return (
               <article
@@ -168,14 +176,21 @@ export default function GroupsPage() {
                       </p>
                     )}
                   </div>
-                  {isActive && (
-                    <Chip variant="brand" className="shrink-0 !text-[10px]">
-                      Active
-                    </Chip>
-                  )}
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    {isGroupAdmin && (
+                      <Chip variant="muted" className="!text-[10px]">
+                        Admin
+                      </Chip>
+                    )}
+                    {isActive && (
+                      <Chip variant="brand" className="!text-[10px]">
+                        Active
+                      </Chip>
+                    )}
+                  </div>
                 </div>
 
-                {isOwner && !isGroupFull(g.memberCount) && (
+                {canGenerateInvite && !isGroupFull(g.memberCount) && (
                   <div
                     className="mt-4 flex flex-wrap items-center gap-2 border-t border-[color-mix(in_srgb,var(--border)_50%,transparent)] pt-4 pl-1"
                     onClick={(e) => e.stopPropagation()}
@@ -184,7 +199,7 @@ export default function GroupsPage() {
                     <InviteCodeBlock
                       joinCode={g.joinCode}
                       joinCodeExpiresAt={g.joinCodeExpiresAt}
-                      onGenerate={() => generateInviteForGroup(g._id)}
+                      onGenerate={(opts) => generateInviteForGroup(g._id, opts)}
                       generating={generatingGroupId === g._id}
                       compact
                       inline
@@ -192,7 +207,7 @@ export default function GroupsPage() {
                   </div>
                 )}
 
-                {isOwner && isGroupFull(g.memberCount) && (
+                {canGenerateInvite && isGroupFull(g.memberCount) && (
                   <p className="mt-4 border-t border-[color-mix(in_srgb,var(--border)_50%,transparent)] pt-4 pl-1 text-xs text-[var(--muted)]">
                     Group full ({MAX_GROUP_MEMBERS}/{MAX_GROUP_MEMBERS})
                   </p>
@@ -215,7 +230,7 @@ export default function GroupsPage() {
       <Modal open={showJoin} onClose={() => setShowJoin(false)} title="Join Group">
         <div className="space-y-4">
           <p className="text-sm text-[var(--muted)]">
-            Enter the invite code shared by your group owner. Groups are limited to {MAX_GROUP_MEMBERS}{" "}
+            Enter the invite code shared by your group admin. Groups are limited to {MAX_GROUP_MEMBERS}{" "}
             members. Codes expire after {JOIN_CODE_TTL_MINUTES} minutes.
           </p>
           <Input

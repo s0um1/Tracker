@@ -5,7 +5,7 @@ import {
   jsonOk,
   jsonError,
   isGroupFull,
-  isJoinCodeExpired,
+  isJoinCodeActive,
   isValidJoinCode,
   MAX_GROUP_MEMBERS,
   normalizeJoinCode,
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
 
     const group = await Group.findOne({ joinCode: normalized }).lean();
     if (!group) return jsonError("Invalid join code", 404);
-    if (isJoinCodeExpired(group.joinCodeExpiresAt)) {
+    if (!isJoinCodeActive(group.joinCode, group.joinCodeExpiresAt)) {
       return jsonError("Join code has expired. Ask the group owner for a new code.", 400);
     }
 
@@ -57,7 +57,7 @@ export async function PUT(request: Request) {
 
     const group = await Group.findOne({ joinCode: normalized });
     if (!group) return jsonError("Invalid join code", 404);
-    if (isJoinCodeExpired(group.joinCodeExpiresAt)) {
+    if (!isJoinCodeActive(group.joinCode, group.joinCodeExpiresAt)) {
       return jsonError("Join code has expired. Ask the group owner for a new code.", 400);
     }
 

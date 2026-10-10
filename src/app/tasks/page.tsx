@@ -7,7 +7,7 @@ import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
 import MotivationBanner from "@/components/dashboard/MotivationBanner";
 import TaskRow, { type TaskWithNames } from "@/components/tasks/TaskRow";
-import { ErrorState, EmptyState, TaskListSkeleton } from "@/components/ui/StateViews";
+import { ErrorState, EmptyState, TasksPageSkeleton } from "@/components/ui/StateViews";
 import toast from "react-hot-toast";
 
 export default function TasksPage() {
@@ -22,10 +22,12 @@ export default function TasksPage() {
   const [updatingIds, setUpdatingIds] = useState<Set<string>>(() => new Set());
   const [deletingIds, setDeletingIds] = useState<Set<string>>(() => new Set());
 
+  const activeGroupId = user?.activeGroupId;
+
   const fetchTasks = useCallback(async () => {
-    if (!user?.activeGroupId) return [];
-    return apiGet<TaskWithNames[]>(`/api/tasks?groupId=${user.activeGroupId}`);
-  }, [user?.activeGroupId]);
+    if (!activeGroupId) return [];
+    return apiGet<TaskWithNames[]>(`/api/tasks?groupId=${activeGroupId}`);
+  }, [activeGroupId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -158,6 +160,10 @@ export default function TasksPage() {
     [tasks]
   );
 
+  if (initialLoad) {
+    return <TasksPageSkeleton />;
+  }
+
   if (error && tasks.length === 0) {
     return <ErrorState message={error} onRetry={() => window.location.reload()} />;
   }
@@ -168,19 +174,17 @@ export default function TasksPage() {
         <div>
           <h1 className="text-2xl font-bold text-[var(--foreground)]">Tasks</h1>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            {initialLoad ? "Loading tasks…" : `${pending.length} pending · ${completed.length} completed`}
+            {`${pending.length} pending · ${completed.length} completed`}
           </p>
         </div>
-        <Button size="sm" onClick={() => setShowModal(true)} disabled={initialLoad}>
+        <Button size="sm" onClick={() => setShowModal(true)}>
           Add Task
         </Button>
       </div>
 
       <MotivationBanner />
 
-      {initialLoad ? (
-        <TaskListSkeleton rows={5} />
-      ) : tasks.length === 0 ? (
+      {tasks.length === 0 ? (
         <EmptyState
           title="No tasks yet"
           description="Add tasks to track what needs to be done."

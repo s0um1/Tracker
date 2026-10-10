@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { SESSION_COOKIE, buildSessionCookie, createSessionToken, verifySessionToken } from "@/lib/session";
+import { NextRequest } from "next/server";
+import { SESSION_COOKIE, createSessionToken, verifySessionToken } from "@/lib/session";
 import { jsonOk, jsonError } from "@/lib/utils";
 
 export async function GET(request: NextRequest) {

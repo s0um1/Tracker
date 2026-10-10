@@ -25,6 +25,7 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const groupId = searchParams.get("groupId");
     const scope = searchParams.get("scope") as ContentScope | "all" | null;
+    const minimal = searchParams.get("minimal") === "1";
 
     const subjectFilter: Record<string, unknown>[] = [];
     if (groupId && (!scope || scope === "all" || scope === "group")) {
@@ -40,6 +41,11 @@ export async function GET(request: Request) {
 
     const filter =
       subjectFilter.length === 1 ? subjectFilter[0] : { $or: subjectFilter };
+
+    if (minimal) {
+      const subjects = await Subject.find(filter).sort({ order: 1 }).lean();
+      return jsonOk(subjects.map(serializeDoc));
+    }
 
     const [subjects, group, groupQuestions, personalQuestions] = await Promise.all([
       Subject.find(filter).sort({ order: 1 }).lean(),

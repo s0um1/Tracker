@@ -46,12 +46,15 @@ export function applyFirstDonePoints(
 
   const completedAt = new Date();
   const { points } = questionCompletionPoints("done", practiceDate, completedAt, completedAt);
-  const award = { pointsAwarded: points, firstCompletedAt: completedAt };
+  const firstCompletedAt = existing?.firstCompletedAt
+    ? new Date(existing.firstCompletedAt)
+    : completedAt;
 
-  if (normalizeQuestionStatus(prevStatus) !== "done") {
-    return { ...award, pointsEarnedNow: points };
-  }
-  return award;
+  return {
+    pointsAwarded: points,
+    firstCompletedAt,
+    pointsEarnedNow: points,
+  };
 }
 
 export function questionCompletionPoints(

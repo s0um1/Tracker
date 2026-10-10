@@ -4,17 +4,14 @@ import { serializeDoc, isGroupMember, canManageGroup } from "@/lib/services";
 import {
   listMockRounds,
   getCurrentRound,
-  countQuestionsDoneTill,
+  countQuestionsDoneBatch,
   roundInterviewDates,
-  createNextMockRound,
   isOnMockInterviewDate,
   upsertMockInterviewSlot,
-  mockObjectIds,
 } from "@/lib/mock-rounds";
 import MockInterviewRound from "@/models/MockInterviewRound";
 import MockInterviewSession from "@/models/MockInterviewSession";
 import MockInterview from "@/models/MockInterview";
-import MockInterviewSlot from "@/models/MockInterviewSlot";
 import Group from "@/models/Group";
 import User from "@/models/User";
 
@@ -46,10 +43,10 @@ export const GET = withAuth(async (request, { userId }) => {
   const users = await User.find({ _id: { $in: memberIds } }).lean();
   const userMap = new Map(users.map((u) => [String(u._id), u.name]));
 
-  const [sessions, slots] = await Promise.all([
-    MockInterviewSession.find({ groupId, roundId: activeRound._id }).lean(),
-    MockInterviewSlot.find({ groupId, roundId: activeRound._id }).lean(),
-  ]);
+  const sessions = await MockInterviewSession.find({
+    groupId,
+    roundId: activeRound._id,
+  }).lean();
   const sessionIds = sessions.map((s) => s._id);
   const scores = sessionIds.length
     ? await MockInterview.find({ sessionId: { $in: sessionIds } }).lean()
@@ -66,14 +63,14 @@ export const GET = withAuth(async (request, { userId }) => {
   const sessionByInterviewee = new Map(
     sessions.map((s) => [String(s.intervieweeId), s])
   );
-  const slotByInterviewee = new Map(
-    slots.map((s) => [String(s.intervieweeId), s])
+  const questionsDoneByMember = await countQuestionsDoneBatch(
+    memberIds,
+    groupId,
+    isViewingHistory ? activeRoundDate ?? undefined : undefined
   );
 
-  const members = await Promise.all(
-    memberIds.map(async (memberId) => {
+  const members = memberIds.map((memberId) => {
       const session = sessionByInterviewee.get(memberId);
-      const slot = slotByInterviewee.get(memberId);
       const expectedScorers = memberIds.filter((id) => id !== memberId);
       const sessionScores = session ? scoresBySession.get(String(session._id)) ?? [] : [];
       const averageScore =
@@ -89,19 +86,14 @@ export const GET = withAuth(async (request, { userId }) => {
           sessionScores.length >= expectedScorers.length ? "completed" : "in_progress";
       }
 
-      const questionsDone = await countQuestionsDoneTill(
-        memberId,
-        groupId,
-        isViewingHistory ? activeRoundDate ?? undefined : undefined
-      );
+      const questionsDone = questionsDoneByMember.get(memberId) ?? 0;
 
       return {
         userId: memberId,
         name: userMap.get(memberId) ?? "Member",
         role: group.members.find((m) => String(m.userId) === memberId)?.role ?? "member",
         status,
-        scheduledAt:
-          slot?.scheduledAt?.toISOString() ?? activeRoundDate?.toISOString() ?? null,
+        scheduledAt: activeRoundDate?.toISOString() ?? null,
         questionsDone,
         questionCount: session?.questions.length ?? 0,
         scoresSubmitted: sessionScores.length,
@@ -133,8 +125,7 @@ export const GET = withAuth(async (request, { userId }) => {
             }
           : null,
       };
-    })
-  );
+  });
 
   const currentRoundDate = currentRound
     ? interviewDates.get(String(currentRound._id))
@@ -158,14 +149,7 @@ export const GET = withAuth(async (request, { userId }) => {
 
 export const PATCH = withAuth(async (request, { userId }) => {
   const body = await request.json();
-  const {
-    action = "setInterviewDate",
-    groupId,
-    roundId,
-    intervieweeId,
-    scheduledAt,
-    interviewDate,
-  } = body;
+  const { action = "setMockDate", groupId, roundId, scheduledAt } = body;
 
   if (!groupId) return jsonError("groupId is required");
 
@@ -175,18 +159,10 @@ export const PATCH = withAuth(async (request, { userId }) => {
   if (!role) return jsonError("Unauthorized", 403);
 
   if (action === "addMockDate") {
-    if (!canManageGroup(role)) return jsonError("Only owners/admins can add mock dates", 403);
-    if (!interviewDate) return jsonError("interviewDate is required");
-
-    const parsed = parseAppDateTime(interviewDate);
-    if (Number.isNaN(parsed.getTime())) return jsonError("Invalid interviewDate");
-
-    const round = await createNextMockRound(groupId, parsed);
-    return jsonOk({
-      roundId: String(round._id),
-      roundNumber: round.roundNumber,
-      interviewDate: parsed.toISOString(),
-    });
+    return jsonError(
+      "Only one mock round is active. Update the group mock date instead.",
+      400
+    );
   }
 
   if (!roundId) return jsonError("roundId is required");
@@ -198,7 +174,7 @@ export const PATCH = withAuth(async (request, { userId }) => {
   }
 
   if (action === "setMockDate" || action === "setAllInterviewDates") {
-    if (!canManageGroup(role)) return jsonError("Only owners/admins can set all dates", 403);
+    if (!canManageGroup(role)) return jsonError("Only admins and co-admins can set mock schedules", 403);
     if (!scheduledAt) return jsonError("scheduledAt is required");
 
     const parsed = parseAppDateTime(scheduledAt);
@@ -224,33 +200,10 @@ export const PATCH = withAuth(async (request, { userId }) => {
   }
 
   if (action === "setInterviewDate") {
-    if (!intervieweeId) return jsonError("intervieweeId is required");
-    if (!group.members.some((m) => String(m.userId) === intervieweeId)) {
-      return jsonError("Interviewee is not a group member", 400);
-    }
-
-    if (scheduledAt === null || scheduledAt === "") {
-      await MockInterviewSlot.deleteOne(mockObjectIds(groupId, roundId, intervieweeId));
-      return jsonOk({ intervieweeId, scheduledAt: null });
-    }
-
-    if (!scheduledAt) return jsonError("scheduledAt is required");
-
-    const parsed = parseAppDateTime(scheduledAt);
-    if (Number.isNaN(parsed.getTime())) return jsonError("Invalid scheduledAt");
-
-    const slot = await upsertMockInterviewSlot({
-      groupId,
-      roundId,
-      intervieweeId,
-      scheduledAt: parsed,
-      scheduledBy: userId,
-    });
-
-    return jsonOk({
-      intervieweeId,
-      scheduledAt: slot!.scheduledAt.toISOString(),
-    });
+    return jsonError(
+      "Per-member interview slots are disabled. Use setMockDate for the whole group.",
+      400
+    );
   }
 
   return jsonError("Unknown action");

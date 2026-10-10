@@ -21,10 +21,15 @@ export default function GroupGamificationPanel({
 
       <Card className="!p-4">
         <CardHeader title="Points this week" subtitle="Group total per day" />
-        <div className="h-48">
+        <div className="h-52">
           <StudyHoursChart
-            data={gamification.dailyPoints.map((d) => ({ label: d.label, value: d.points }))}
+            data={gamification.dailyPoints.map((d) => ({
+              label: d.label,
+              value: d.points,
+              date: d.date,
+            }))}
             color="var(--accent)"
+            valueSuffix="pts"
           />
         </div>
       </Card>

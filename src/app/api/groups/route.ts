@@ -12,7 +12,7 @@ export async function GET(request: Request) {
     await connectToDatabase();
     const filter = { "members.userId": userId };
 
-    const groups = await Group.find(filter).sort({ createdAt: -1 });
+    const groups = await Group.find(filter).sort({ createdAt: -1 }).lean();
     const groupIds = groups.map((g) => g._id);
     const allSubjects = groupIds.length
       ? await Subject.find({ groupId: { $in: groupIds }, isActive: true }).lean()
@@ -26,11 +26,15 @@ export async function GET(request: Request) {
       subjectsByGroup.set(gid, list);
     }
 
-    const result = groups.map((g) => ({
-      ...serializeDoc(g.toObject()),
-      memberCount: g.members.length,
-      subjects: subjectsByGroup.get(String(g._id)) ?? [],
-    }));
+    const result = groups.map((g) => {
+      const me = g.members.find((m) => String(m.userId) === userId);
+      return {
+        ...serializeDoc(g),
+        memberCount: g.members.length,
+        subjects: subjectsByGroup.get(String(g._id)) ?? [],
+        myRole: me?.role ?? null,
+      };
+    });
     return jsonOk(result);
   } catch (err) {
     if (err instanceof Error && err.message === "Unauthorized") return unauthorized();

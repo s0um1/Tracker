@@ -4,8 +4,7 @@ import { useEffect, useState } from "react";
 import Button from "@/components/ui/Button";
 import {
   formatJoinCodeCountdown,
-  isJoinCodeExpired,
-  isValidJoinCode,
+  isJoinCodeActive,
   joinCodeSecondsRemaining,
 } from "@/lib/utils";
 import toast from "react-hot-toast";
@@ -13,7 +12,7 @@ import toast from "react-hot-toast";
 type InviteCodeBlockProps = {
   joinCode?: string;
   joinCodeExpiresAt?: string;
-  onGenerate?: () => void | Promise<void>;
+  onGenerate?: (opts?: { force?: boolean }) => void | Promise<void>;
   generating?: boolean;
   compact?: boolean;
   inline?: boolean;
@@ -29,13 +28,10 @@ export default function InviteCodeBlock({
 }: InviteCodeBlockProps) {
   const [secondsLeft, setSecondsLeft] = useState(0);
   const valid =
-    Boolean(joinCode) &&
-    Boolean(joinCodeExpiresAt) &&
-    isValidJoinCode(joinCode!) &&
-    !isJoinCodeExpired(joinCodeExpiresAt!);
+    Boolean(joinCode) && Boolean(joinCodeExpiresAt) && isJoinCodeActive(joinCode!, joinCodeExpiresAt);
 
   useEffect(() => {
-    if (!joinCodeExpiresAt || isJoinCodeExpired(joinCodeExpiresAt)) {
+    if (!joinCode || !joinCodeExpiresAt || !isJoinCodeActive(joinCode, joinCodeExpiresAt)) {
       setSecondsLeft(0);
       return;
     }
@@ -43,12 +39,25 @@ export default function InviteCodeBlock({
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [joinCodeExpiresAt]);
+  }, [joinCode, joinCodeExpiresAt]);
 
   const copy = () => {
     if (!joinCode) return;
     navigator.clipboard.writeText(joinCode);
     toast.success("Invite code copied!");
+  };
+
+  const requestNewCode = async () => {
+    if (!onGenerate) return;
+    if (valid && secondsLeft > 0) {
+      const ok = window.confirm(
+        "Replace the current invite code? Anyone with the old code won't be able to join."
+      );
+      if (!ok) return;
+      await onGenerate({ force: true });
+      return;
+    }
+    await onGenerate();
   };
 
   if (!valid) {
@@ -57,7 +66,7 @@ export default function InviteCodeBlock({
       <Button
         variant={inline ? "ghost" : "outline"}
         size="sm"
-        onClick={onGenerate}
+        onClick={() => onGenerate()}
         disabled={generating}
         className={compact && !inline ? "w-full" : undefined}
       >
@@ -79,8 +88,8 @@ export default function InviteCodeBlock({
           <Button
             variant="ghost"
             size="sm"
-            onClick={onGenerate}
-            disabled={generating || secondsLeft > 0}
+            onClick={requestNewCode}
+            disabled={generating}
           >
             {generating ? "…" : "New"}
           </Button>
@@ -111,8 +120,8 @@ export default function InviteCodeBlock({
           <Button
             variant="ghost"
             size="sm"
-            onClick={onGenerate}
-            disabled={generating || secondsLeft > 0}
+            onClick={requestNewCode}
+            disabled={generating}
           >
             {generating ? "…" : "New code"}
           </Button>
@@ -120,7 +129,7 @@ export default function InviteCodeBlock({
       </div>
       <p className="text-xs text-[var(--muted)]">
         Expires in {formatJoinCodeCountdown(secondsLeft)}
-        {secondsLeft > 0 ? " — new code available after expiry" : ""}
+        {secondsLeft > 0 ? " — or use New to replace early" : ""}
       </p>
     </div>
   );

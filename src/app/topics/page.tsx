@@ -9,7 +9,7 @@ import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
 import Modal from "@/components/ui/Modal";
 import { ConfidenceBadge, PriorityBadge } from "@/components/ui/Badge";
-import { LoadingState, ErrorState, EmptyState } from "@/components/ui/StateViews";
+import { TopicsPageSkeleton, ErrorState, EmptyState } from "@/components/ui/StateViews";
 import { TOPIC_STATUS_META } from "@/lib/utils";
 import toast from "react-hot-toast";
 import type { ContentScope, Subject, TopicWithProgress } from "@/types";
@@ -28,7 +28,12 @@ function TopicsContent() {
   const [newSubjectId, setNewSubjectId] = useState("");
 
   const load = useCallback(async () => {
-    if (!user?.activeGroupId && tab === "group") return;
+    if (!user?.activeGroupId && tab === "group") {
+      setLoading(false);
+      setTopics([]);
+      setSubjects([]);
+      return;
+    }
     setLoading(true);
     try {
       const subjectUrl =
@@ -85,7 +90,7 @@ function TopicsContent() {
     }
   };
 
-  if (loading) return <LoadingState />;
+  if (loading) return <TopicsPageSkeleton />;
   if (error) return <ErrorState message={error} onRetry={load} />;
 
   const grouped = topics.reduce<Record<string, TopicWithProgress[]>>((acc, t) => {
@@ -218,7 +223,7 @@ function TopicsContent() {
 
 export default function TopicsPage() {
   return (
-    <Suspense fallback={<LoadingState />}>
+    <Suspense fallback={<TopicsPageSkeleton />}>
       <TopicsContent />
     </Suspense>
   );

@@ -67,7 +67,6 @@ export default function Sidebar() {
             <div className="text-sm font-medium text-[var(--foreground)]">{user.name}</div>
             <div className="text-xs text-[var(--muted)]">
               {user.username ? `@${user.username}` : user.email || "Shared account"}
-              {user.username ? ` · ${user.dailyStudyMinutes ?? 120} min/day` : ""}
             </div>
           </>
         )}

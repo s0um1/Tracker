@@ -5,10 +5,17 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useUser } from "@/components/providers/UserProvider";
 import { apiGet, apiPatch, apiPost, apiDelete, getErrorMessage } from "@/lib/api";
+import {
+  canManageGroup,
+  canPromoteToCoAdmin,
+  canRemoveGroupMember,
+  formatGroupRoleLabel,
+  isGroupAdminRole,
+} from "@/lib/group-roles";
 import Card, { CardHeader } from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
-import { LoadingState, ErrorState } from "@/components/ui/StateViews";
+import { GroupDetailSkeleton, ErrorState } from "@/components/ui/StateViews";
 import InviteCodeBlock from "@/components/groups/InviteCodeBlock";
 import GroupGamificationPanel from "@/components/groups/GroupGamificationPanel";
 import QuestionListView from "@/components/questions/QuestionListView";
@@ -28,6 +35,7 @@ import {
 import type {
   Group,
   GroupGamification,
+  GroupRole,
   MemberStat,
   PracticeQuestion,
   QuestionStatus,
@@ -41,7 +49,26 @@ type GroupDetail = Group & {
   gamification: GroupGamification;
   topicCount: number;
   countdown: { days: number; hours: number; interviewDate: string };
+  subjects?: Subject[];
+  groupQuestions?: GroupQuestion[];
 };
+
+function mergeGroupMembers(prev: GroupDetail, updated: Group): GroupDetail {
+  const roleByUser = new Map(
+    updated.members.map((m) => [String(m.userId), m.role])
+  );
+  const memberIds = new Set(updated.members.map((m) => String(m.userId)));
+  return {
+    ...prev,
+    ...updated,
+    memberStats: prev.memberStats
+      .filter((m) => memberIds.has(m.userId))
+      .map((m) => ({
+        ...m,
+        role: roleByUser.get(m.userId) ?? m.role,
+      })),
+  };
+}
 
 export default function GroupDetailPage() {
   const params = useParams();
@@ -55,7 +82,8 @@ export default function GroupDetailPage() {
   const [pointBurst, setPointBurst] = useState<QuestionPointBurst | null>(null);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [showQuestionModal, setShowQuestionModal] = useState(false);
-  const [newQuestion, setNewQuestion] = useState("");
+  const [newQuestionTitle, setNewQuestionTitle] = useState("");
+  const [newQuestionDescription, setNewQuestionDescription] = useState("");
   const [newSubjectId, setNewSubjectId] = useState("");
   const [practiceDate, setPracticeDate] = useState(toDateInputValue());
   const [inviteLoading, setInviteLoading] = useState(false);
@@ -63,35 +91,35 @@ export default function GroupDetailPage() {
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [savingGroup, setSavingGroup] = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deletingGroup, setDeletingGroup] = useState(false);
-  const [showTransferModal, setShowTransferModal] = useState(false);
   const [transferTargetId, setTransferTargetId] = useState("");
   const [transferring, setTransferring] = useState(false);
   const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
+  const [updatingRoleMemberId, setUpdatingRoleMemberId] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false;
+    if (!silent) setLoading(true);
     try {
-      const [data, questionData, subjectData] = await Promise.all([
-        apiGet<GroupDetail>(`/api/groups/${groupId}`),
-        apiGet<GroupQuestion[]>(`/api/practice-questions?groupId=${groupId}&scope=group`),
-        apiGet<Subject[]>(`/api/subjects?groupId=${groupId}&scope=group`),
-      ]);
+      const data = await apiGet<GroupDetail>(
+        `/api/groups/${groupId}?include=questions,subjects`
+      );
+      const subjectData = data.subjects ?? [];
+      const questionData = data.groupQuestions ?? [];
       setGroup(data);
       setGroupQuestions(questionData);
       setSubjects(subjectData);
-      if (!newSubjectId && subjectData.length > 0) {
-        setNewSubjectId(subjectData[0]._id);
-      }
+      setNewSubjectId((current) =>
+        current || subjectData.length === 0 ? current : subjectData[0]._id
+      );
       setError("");
     } catch (err) {
       setError(getErrorMessage(err, "Failed to load group"));
-      setGroup(null);
+      if (!silent) setGroup(null);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  }, [groupId, user]);
+  }, [groupId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -111,7 +139,19 @@ export default function GroupDetailPage() {
         `/api/practice-questions/${id}`,
         { status: normalized }
       );
-      triggerQuestionPointsBurst(setPointBurst, id, updated.pointsEarnedNow);
+      const earned = updated.pointsEarnedNow;
+      triggerQuestionPointsBurst(setPointBurst, id, earned);
+      if (earned != null && earned > 0 && user?._id) {
+        setGroup((prev) => {
+          if (!prev?.gamification) return prev;
+          const leaderboard = prev.gamification.leaderboard
+            .map((m) =>
+              m.userId === user._id ? { ...m, totalPoints: m.totalPoints + earned } : m
+            )
+            .sort((a, b) => b.totalPoints - a.totalPoints);
+          return { ...prev, gamification: { ...prev.gamification, leaderboard } };
+        });
+      }
       if (normalized === "add_to_todo") {
         toast.success("Added to Tasks");
       }
@@ -124,30 +164,33 @@ export default function GroupDetailPage() {
   };
 
   const addGroupQuestion = async () => {
-    if (!user || !newQuestion.trim() || !newSubjectId) return;
+    if (!user || !newQuestionTitle.trim() || !newSubjectId) return;
     try {
       await apiPost("/api/practice-questions", {
         groupId,
         subjectId: newSubjectId,
-        content: newQuestion,
+        title: newQuestionTitle.trim(),
+        description: newQuestionDescription.trim(),
         scope: "group",
         practiceDate,
       });
       toast.success("Question added for everyone");
       setShowQuestionModal(false);
-      setNewQuestion("");
+      setNewQuestionTitle("");
+      setNewQuestionDescription("");
       setPracticeDate(toDateInputValue());
-      load();
+      load({ silent: true });
     } catch (err) {
       toast.error(getErrorMessage(err, "Failed to add question"));
     }
   };
 
-  const generateInviteCode = useCallback(async () => {
+  const generateInviteCode = useCallback(async (opts?: { force?: boolean }) => {
     setInviteLoading(true);
     try {
       const res = await apiPost<{ joinCode: string; joinCodeExpiresAt: string }>(
-        `/api/groups/${groupId}/regenerate-code`
+        `/api/groups/${groupId}/regenerate-code`,
+        opts?.force ? { force: true } : {}
       );
       setGroup((prev) =>
         prev
@@ -162,14 +205,18 @@ export default function GroupDetailPage() {
     }
   }, [groupId]);
 
-  const myRole = group?.members.find((m) => String(m.userId) === user?._id)?.role;
-  const isOwner = myRole === "owner";
-  const canEditGroup = myRole === "owner" || myRole === "admin";
+  const myRole = (
+    group?.memberStats.find((m) => m.userId === user?._id)?.role ??
+    group?.members.find((m) => String(m.userId) === user?._id)?.role
+  ) as GroupRole | undefined;
+  const isGroupAdmin = isGroupAdminRole(myRole);
+  const canEditGroup = canManageGroup(myRole);
 
   const openEditModal = () => {
     if (!group) return;
     setEditName(group.name);
     setEditDescription(group.description ?? "");
+    setTransferTargetId("");
     setShowEditModal(true);
   };
 
@@ -202,22 +249,39 @@ export default function GroupDetailPage() {
       toast.error(getErrorMessage(err, "Failed to delete group"));
     } finally {
       setDeletingGroup(false);
-      setShowDeleteModal(false);
+    }
+  };
+
+  const setMemberRole = async (memberId: string, role: "admin" | "member") => {
+    setUpdatingRoleMemberId(memberId);
+    try {
+      const updated = await apiPatch<Group>(
+        `/api/groups/${groupId}/members/${memberId}`,
+        { role }
+      );
+      setGroup((prev) => (prev ? mergeGroupMembers(prev, updated) : prev));
+      toast.success(role === "admin" ? "Co-admin added" : "Co-admin removed");
+    } catch (err) {
+      toast.error(getErrorMessage(err, "Failed to update role"));
+    } finally {
+      setUpdatingRoleMemberId(null);
     }
   };
 
   const removeMember = async (memberId: string) => {
     setRemovingMemberId(memberId);
     try {
-      await apiDelete(`/api/groups/${groupId}/members/${memberId}`);
+      const updated = await apiDelete<Group>(
+        `/api/groups/${groupId}/members/${memberId}`
+      );
       if (memberId === user?._id) {
         await refreshUser();
         toast.success("You left the group");
         router.push("/groups");
         return;
       }
+      setGroup((prev) => (prev ? mergeGroupMembers(prev, updated) : prev));
       toast.success("Member removed");
-      load();
     } catch (err) {
       toast.error(getErrorMessage(err, "Failed to remove member"));
     } finally {
@@ -229,25 +293,25 @@ export default function GroupDetailPage() {
     if (!transferTargetId) return;
     setTransferring(true);
     try {
-      await apiPost(`/api/groups/${groupId}/transfer-ownership`, {
+      const updated = await apiPost<Group>(`/api/groups/${groupId}/transfer-ownership`, {
         newOwnerId: transferTargetId,
       });
-      toast.success("Ownership transferred");
-      setShowTransferModal(false);
+      setGroup((prev) => (prev ? mergeGroupMembers(prev, updated) : prev));
+      toast.success("Admin role transferred");
+      setShowEditModal(false);
       setTransferTargetId("");
-      load();
     } catch (err) {
-      toast.error(getErrorMessage(err, "Failed to transfer ownership"));
+      toast.error(getErrorMessage(err, "Failed to transfer admin role"));
     } finally {
       setTransferring(false);
     }
   };
 
   const otherMembers = group?.memberStats.filter(
-    (m) => m.userId !== user?._id && m.role !== "owner"
+    (m) => m.userId !== user?._id && !isGroupAdminRole(m.role)
   ) ?? [];
 
-  if (loading) return <LoadingState />;
+  if (loading) return <GroupDetailSkeleton />;
   if (error) return <ErrorState message={error} onRetry={load} />;
   if (!group) return <ErrorState message="Group not found" onRetry={load} />;
 
@@ -258,16 +322,6 @@ export default function GroupDetailPage() {
           <Button variant="outline" size="sm" onClick={openEditModal}>
             Edit Group
           </Button>
-          {isOwner && otherMembers.length > 0 && (
-            <Button variant="outline" size="sm" onClick={() => setShowTransferModal(true)}>
-              Transfer Ownership
-            </Button>
-          )}
-          {isOwner && (
-            <Button variant="danger" size="sm" onClick={() => setShowDeleteModal(true)}>
-              Delete Group
-            </Button>
-          )}
         </div>
       )}
 
@@ -276,6 +330,11 @@ export default function GroupDetailPage() {
       <Card className="!p-4">
         <CardHeader
           title={`Members (${group.memberStats.length}/${MAX_GROUP_MEMBERS})`}
+          subtitle={
+            isGroupAdmin
+              ? "Promote members to co-admin using Make co-admin in the Actions column."
+              : undefined
+          }
         />
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -285,7 +344,7 @@ export default function GroupDetailPage() {
                 <th className="pb-2">Role</th>
                 <th className="pb-2">Points</th>
                 <th className="pb-2">Tasks</th>
-                <th className="pb-2" />
+                <th className="pb-2 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -293,9 +352,12 @@ export default function GroupDetailPage() {
                 const points =
                   group.gamification?.leaderboard.find((g) => g.userId === m.userId)?.totalPoints ?? 0;
                 const isMe = m.userId === user?._id;
-                const canRemove =
-                  m.role !== "owner" &&
-                  (isMe || isOwner);
+                const targetRole = (m.role ??
+                  group.members.find((gm) => String(gm.userId) === m.userId)?.role ??
+                  "member") as GroupRole;
+                const canRemove = canRemoveGroupMember(myRole, targetRole, isMe);
+                const canChangeRole =
+                  canPromoteToCoAdmin(myRole) && !isMe && !isGroupAdminRole(targetRole);
                 return (
                   <tr key={m.userId} className="table-row">
                     <td className="py-2.5 font-medium">
@@ -304,24 +366,46 @@ export default function GroupDetailPage() {
                         {isMe ? " (you)" : ""}
                       </Link>
                     </td>
-                    <td className="py-2.5 capitalize text-[var(--muted)]">{m.role}</td>
+                    <td className="py-2.5 text-[var(--muted)]">{formatGroupRoleLabel(targetRole)}</td>
                     <td className="py-2.5 font-semibold text-brand">{points}</td>
                     <td className="py-2.5">{m.tasksCompleted}</td>
                     <td className="py-2.5 text-right">
-                      {canRemove && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={removingMemberId === m.userId}
-                          onClick={() => removeMember(m.userId)}
-                        >
-                          {removingMemberId === m.userId
-                            ? "…"
-                            : isMe
-                              ? "Leave"
-                              : "Remove"}
-                        </Button>
-                      )}
+                      <div className="flex flex-wrap justify-end gap-1">
+                        {canChangeRole && targetRole === "member" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={updatingRoleMemberId === m.userId}
+                            onClick={() => setMemberRole(m.userId, "admin")}
+                          >
+                            {updatingRoleMemberId === m.userId ? "…" : "Make co-admin"}
+                          </Button>
+                        )}
+                        {canChangeRole && targetRole === "admin" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={updatingRoleMemberId === m.userId}
+                            onClick={() => setMemberRole(m.userId, "member")}
+                          >
+                            {updatingRoleMemberId === m.userId ? "…" : "Remove co-admin"}
+                          </Button>
+                        )}
+                        {canRemove && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={removingMemberId === m.userId}
+                            onClick={() => removeMember(m.userId)}
+                          >
+                            {removingMemberId === m.userId
+                              ? "…"
+                              : isMe
+                                ? "Leave"
+                                : "Remove"}
+                          </Button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -340,9 +424,11 @@ export default function GroupDetailPage() {
               <Link href="/questions">
                 <Button variant="outline" size="sm">View All</Button>
               </Link>
-              <Button size="sm" onClick={() => setShowQuestionModal(true)} disabled={subjects.length === 0}>
-                Add Question
-              </Button>
+              {canEditGroup && (
+                <Button size="sm" onClick={() => setShowQuestionModal(true)} disabled={subjects.length === 0}>
+                  Add Question
+                </Button>
+              )}
             </div>
           }
         />
@@ -361,7 +447,7 @@ export default function GroupDetailPage() {
 
       <Card>
         <CardHeader title="Invite Members" />
-        {isOwner ? (
+        {canEditGroup ? (
           <div className="space-y-3">
             <p className="text-sm text-[var(--muted)]">
               Generate a short-lived invite code when you are ready to add someone. Codes expire after{" "}
@@ -382,86 +468,95 @@ export default function GroupDetailPage() {
           </div>
         ) : (
           <p className="text-sm text-[var(--muted)]">
-            Ask the group owner for a fresh invite code when you want to add a teammate.
+            Ask a group admin or co-admin for a fresh invite code when you want to add a teammate.
           </p>
         )}
       </Card>
 
-      <Modal open={showDeleteModal} onClose={() => setShowDeleteModal(false)} title="Delete Group">
-        <div className="space-y-4">
-          <p className="text-sm text-[var(--muted)]">
-            This permanently deletes <strong>{group.name}</strong> and all its questions, subjects,
-            and progress data. This cannot be undone.
-          </p>
-          <div className="flex gap-2">
-            <Button variant="outline" className="flex-1" onClick={() => setShowDeleteModal(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="danger"
-              className="flex-1"
-              disabled={deletingGroup}
-              onClick={deleteGroup}
-            >
-              {deletingGroup ? "Deleting…" : "Delete Group"}
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
-      <Modal
-        open={showTransferModal}
-        onClose={() => setShowTransferModal(false)}
-        title="Transfer Ownership"
-      >
-        <div className="space-y-4">
-          <p className="text-sm text-[var(--muted)]">
-            Choose a member to become the new owner. You will become a regular member.
-          </p>
-          <select
-            value={transferTargetId}
-            onChange={(e) => setTransferTargetId(e.target.value)}
-            className="w-full rounded-lg border border-[var(--input-border)] px-4 py-2 text-sm dark:bg-[var(--input-bg)]"
-          >
-            <option value="">Select member…</option>
-            {otherMembers.map((m) => (
-              <option key={m.userId} value={m.userId}>{m.name}</option>
-            ))}
-          </select>
-          <Button
-            className="w-full"
-            disabled={!transferTargetId || transferring}
-            onClick={transferOwnership}
-          >
-            {transferring ? "Transferring…" : "Transfer Ownership"}
-          </Button>
-        </div>
-      </Modal>
-
       <Modal open={showEditModal} onClose={() => setShowEditModal(false)} title="Edit Group">
-        <div className="space-y-4">
-          <div>
-            <label className="text-sm font-medium">Group name</label>
-            <input
-              type="text"
-              value={editName}
-              onChange={(e) => setEditName(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-[var(--input-border)] px-4 py-2 text-sm dark:bg-[var(--input-bg)]"
-            />
+        <div className="space-y-5">
+          <div className="space-y-3">
+            <div>
+              <label className="text-sm font-medium">Group name</label>
+              <input
+                type="text"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-[var(--input-border)] px-3 py-1.5 text-sm dark:bg-[var(--input-bg)]"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Description</label>
+              <input
+                type="text"
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                placeholder="Optional"
+                className="mt-1 w-full rounded-lg border border-[var(--input-border)] px-3 py-1.5 text-sm dark:bg-[var(--input-bg)]"
+              />
+            </div>
+            <div className="flex justify-end pt-1">
+              <Button
+                size="sm"
+                onClick={saveGroup}
+                disabled={savingGroup || !editName.trim()}
+              >
+                {savingGroup ? "Saving…" : "Save changes"}
+              </Button>
+            </div>
           </div>
-          <div>
-            <label className="text-sm font-medium">Description</label>
-            <input
-              type="text"
-              value={editDescription}
-              onChange={(e) => setEditDescription(e.target.value)}
-              placeholder="Optional"
-              className="mt-1 w-full rounded-lg border border-[var(--input-border)] px-4 py-2 text-sm dark:bg-[var(--input-bg)]"
-            />
-          </div>
-          <Button onClick={saveGroup} className="w-full" disabled={savingGroup || !editName.trim()}>
-            {savingGroup ? "Saving…" : "Save Changes"}
-          </Button>
+
+          {isGroupAdmin && otherMembers.length > 0 && (
+            <div className="space-y-2 border-t border-[var(--border)] pt-4">
+              <div>
+                <h3 className="text-sm font-semibold text-[var(--foreground)]">Transfer admin role</h3>
+                <p className="mt-0.5 text-xs text-[var(--muted)]">
+                  New admin takes over; you become a regular member.
+                </p>
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <select
+                  value={transferTargetId}
+                  onChange={(e) => setTransferTargetId(e.target.value)}
+                  className="min-w-0 flex-1 rounded-lg border border-[var(--input-border)] px-3 py-1.5 text-sm dark:bg-[var(--input-bg)]"
+                >
+                  <option value="">Select member…</option>
+                  {otherMembers.map((m) => (
+                    <option key={m.userId} value={m.userId}>{m.name}</option>
+                  ))}
+                </select>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 sm:w-auto"
+                  disabled={!transferTargetId || transferring}
+                  onClick={transferOwnership}
+                >
+                  {transferring ? "Transferring…" : "Transfer"}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {isGroupAdmin && (
+            <div className="space-y-2 border-t border-[var(--border)] pt-4">
+              <div>
+                <h3 className="text-sm font-semibold text-[var(--foreground)]">Delete group</h3>
+                <p className="mt-0.5 text-xs text-[var(--muted)]">
+                  Permanently deletes <strong>{group.name}</strong> and all questions, subjects, and
+                  progress.
+                </p>
+              </div>
+              <Button
+                variant="danger"
+                size="sm"
+                disabled={deletingGroup}
+                onClick={deleteGroup}
+              >
+                {deletingGroup ? "Deleting…" : "Delete group"}
+              </Button>
+            </div>
+          )}
         </div>
       </Modal>
 
@@ -492,15 +587,30 @@ export default function GroupDetailPage() {
             </select>
           </div>
           <div>
-            <label className="text-sm font-medium">Question</label>
+            <label className="text-sm font-medium">Title</label>
+            <input
+              type="text"
+              value={newQuestionTitle}
+              onChange={(e) => setNewQuestionTitle(e.target.value)}
+              placeholder="Short question title"
+              className="mt-1 w-full rounded-lg border border-[var(--input-border)] px-4 py-2 text-sm dark:border-[var(--input-border)] dark:bg-[var(--input-bg)]"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium">Description</label>
             <textarea
-              value={newQuestion}
-              onChange={(e) => setNewQuestion(e.target.value)}
+              value={newQuestionDescription}
+              onChange={(e) => setNewQuestionDescription(e.target.value)}
+              placeholder="Full prompt, constraints, or follow-ups (optional)"
               rows={3}
               className="mt-1 w-full rounded-lg border border-[var(--input-border)] px-4 py-2 text-sm dark:border-[var(--input-border)] dark:bg-[var(--input-bg)]"
             />
           </div>
-          <Button onClick={addGroupQuestion} className="w-full" disabled={!newQuestion.trim() || !newSubjectId}>
+          <Button
+            onClick={addGroupQuestion}
+            className="w-full"
+            disabled={!newQuestionTitle.trim() || !newSubjectId}
+          >
             Add for Everyone
           </Button>
         </div>

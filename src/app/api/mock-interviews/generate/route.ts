@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 import { withAuth } from "@/lib/api-handler";
 import { isDuplicateKeyError } from "@/lib/db-indexes";
 import { jsonOk, jsonError } from "@/lib/utils";
-import { isGroupMember } from "@/lib/services";
+import { isGroupMember, canManageGroup } from "@/lib/services";
 import { pickMockInterviewQuestions } from "@/lib/mock-interview";
 import MockInterviewSession from "@/models/MockInterviewSession";
 import Group from "@/models/Group";
@@ -24,7 +24,11 @@ export const POST = withAuth(async (request, { userId }) => {
 
   const group = await Group.findById(groupId).lean();
   if (!group) return jsonError("Group not found", 404);
-  if (!isGroupMember(group, userId)) return jsonError("Unauthorized", 403);
+  const role = isGroupMember(group, userId);
+  if (!role) return jsonError("Unauthorized", 403);
+  if (!canManageGroup(role)) {
+    return jsonError("Only admins and co-admins can generate mock questions", 403);
+  }
   if (!group.members.some((m) => String(m.userId) === intervieweeId)) {
     return jsonError("Interviewee is not a group member", 400);
   }

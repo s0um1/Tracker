@@ -6,7 +6,7 @@ import Link from "next/link";
 import { apiGet } from "@/lib/api";
 import Card, { CardHeader } from "@/components/ui/Card";
 import { ReadinessRing } from "@/components/ui/ProgressBar";
-import { LoadingState, ErrorState } from "@/components/ui/StateViews";
+import { ProfilePageSkeleton, ErrorState } from "@/components/ui/StateViews";
 import { formatDate } from "@/lib/utils";
 import type { UserProfile } from "@/types";
 
@@ -34,7 +34,7 @@ export default function UserProfilePage() {
 
   useEffect(() => { load(); }, [load]);
 
-  if (loading) return <LoadingState message="Loading profile..." />;
+  if (loading) return <ProfilePageSkeleton />;
   if (error) return <ErrorState message={error} onRetry={load} />;
   if (!profile) return null;
 
