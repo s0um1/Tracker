@@ -90,11 +90,16 @@ export function buildMainNav(activeGroupId?: string): NavItem[] {
 
 export const MAIN_NAV: NavItem[] = buildMainNav();
 
+const MOBILE_PRIMARY_HREFS = ["/dashboard", "/questions", "/tasks", EXTERNAL_CAREERFLOW_HREF];
+
 export function buildMobileNav(activeGroupId?: string): NavItem[] {
   const nav = buildMainNav(activeGroupId);
-  return nav.filter((item) =>
-    ["/dashboard", "/questions", "/tasks", EXTERNAL_CAREERFLOW_HREF, "/settings"].includes(item.href)
-  );
+  return nav.filter((item) => MOBILE_PRIMARY_HREFS.includes(item.href));
+}
+
+export function buildMobileMoreNav(activeGroupId?: string): NavItem[] {
+  const nav = buildMainNav(activeGroupId);
+  return nav.filter((item) => !MOBILE_PRIMARY_HREFS.includes(item.href));
 }
 
 export const MOBILE_NAV = buildMobileNav();

@@ -418,10 +418,11 @@ body {
     @apply inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold;
   }
 
-  .question-row-card {
-    border-left: 5px solid var(--qs-row-border);
-    background: linear-gradient(90deg, var(--qs-row-bg) 0%, var(--card) 42%);
-  }
+}
+
+.question-row-card {
+  border-left: 5px solid var(--qs-row-border);
+  background-color: var(--qs-row-bg);
 }
 
 .question-row > .qs-row-cell {
