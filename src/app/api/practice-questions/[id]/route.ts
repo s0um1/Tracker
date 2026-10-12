@@ -15,7 +15,6 @@ import {
   isGroupMember,
   canManageGroup,
   invalidateGroupInsights,
-  syncGroupProgressToPersonal,
   syncQuestionTodoTask,
 } from "@/lib/services";
 import PracticeQuestion from "@/models/PracticeQuestion";
@@ -78,14 +77,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
       if (progress) {
         const status = normalizeQuestionStatus(progress.status);
-        if (question.scope === "group") {
-          await syncGroupProgressToPersonal(userId, question, {
-            status,
-            confidence: progress.confidence,
-            lastPracticed: progress.lastPracticed,
-            notes: progress.notes,
-          });
-        } else {
+        if (question.scope === "personal") {
           await PracticeQuestion.findByIdAndUpdate(id, {
             status: progress.status,
             confidence: progress.confidence,

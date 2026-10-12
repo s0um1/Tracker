@@ -29,6 +29,7 @@ import {
   startOfDay,
 } from "./utils";
 import { questionProgressFields, questionStatusForUser } from "./question-progress";
+import { NATIVE_PERSONAL_QUESTION_FILTER } from "./practice-question-filters";
 import type { ContentUnit, TodayQuestion } from "@/types";
 import {
   buildGroupGamification,
@@ -367,7 +368,13 @@ export async function ensureQuestionTodoTasks(userId: string, groupId: string) {
   const [groupQuestions, progress, personalQuestions] = await Promise.all([
     PracticeQuestion.find({ groupId: gid, scope: "group" }).lean(),
     QuestionProgress.find({ userId: uid, status: "add_to_todo" }).lean(),
-    PracticeQuestion.find({ userId: uid, groupId: gid, scope: "personal", status: "add_to_todo" }).lean(),
+    PracticeQuestion.find({
+      userId: uid,
+      groupId: gid,
+      scope: "personal",
+      status: "add_to_todo",
+      ...NATIVE_PERSONAL_QUESTION_FILTER,
+    }).lean(),
   ]);
 
   const groupById = new Map(groupQuestions.map((q) => [String(q._id), q]));
@@ -725,7 +732,13 @@ export async function getTodayQuestionsForUser(
     PracticeQuestion.find({ groupId, scope: "group", ...dateFilter })
       .sort({ practiceDate: -1, createdAt: -1 })
       .lean(),
-    PracticeQuestion.find({ userId, groupId, scope: "personal", ...dateFilter })
+    PracticeQuestion.find({
+      userId,
+      groupId,
+      scope: "personal",
+      ...NATIVE_PERSONAL_QUESTION_FILTER,
+      ...dateFilter,
+    })
       .sort({ practiceDate: -1, createdAt: -1 })
       .lean(),
     Subject.find({

@@ -8,6 +8,7 @@ import {
   trackProgress,
 } from "@/lib/analytics-questions";
 import { questionStatusForUser } from "@/lib/question-progress";
+import { NATIVE_PERSONAL_QUESTION_FILTER } from "@/lib/practice-question-filters";
 import { buildMemberGamification } from "@/lib/question-gamification";
 import { getGroupInsights } from "@/lib/services";
 import { analyticsCacheKey, getCached } from "@/lib/ttl-cache";
@@ -71,7 +72,12 @@ async function buildAnalytics(
       Topic.find({ groupId }).select("subjectId status").lean(),
       MockInterview.find({ userId, groupId }).select("date score subjectId").lean(),
       Group.findById(groupId).select("members").lean(),
-      PracticeQuestion.find({ userId, groupId, scope: "personal" })
+      PracticeQuestion.find({
+        userId,
+        groupId,
+        scope: "personal",
+        ...NATIVE_PERSONAL_QUESTION_FILTER,
+      })
         .select("subjectId status lastPracticed firstCompletedAt practiceDate createdAt")
         .lean(),
       PracticeQuestion.find({ groupId, scope: "group" })

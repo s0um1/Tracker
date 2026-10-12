@@ -28,6 +28,7 @@ import {
 } from "@/lib/services";
 import mongoose from "mongoose";
 import { questionProgressFields } from "@/lib/question-progress";
+import { NATIVE_PERSONAL_QUESTION_FILTER } from "@/lib/practice-question-filters";
 import PracticeQuestion from "@/models/PracticeQuestion";
 import QuestionProgress from "@/models/QuestionProgress";
 import Subject from "@/models/Subject";
@@ -64,7 +65,12 @@ export async function GET(request: Request) {
       filters.push({ groupId, scope: "group" });
     }
     if (!scope || scope === "all" || scope === "personal") {
-      filters.push({ groupId, userId, scope: "personal" });
+      filters.push({
+        groupId,
+        userId,
+        scope: "personal",
+        ...NATIVE_PERSONAL_QUESTION_FILTER,
+      });
     }
 
     const questionFilter: Record<string, unknown> =

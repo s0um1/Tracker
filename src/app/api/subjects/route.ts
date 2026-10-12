@@ -8,6 +8,7 @@ import {
   buildQuestionStats,
   toQuestionsByDate,
 } from "@/lib/question-stats";
+import { NATIVE_PERSONAL_QUESTION_FILTER } from "@/lib/practice-question-filters";
 import { normalizeQuestionStatus } from "@/lib/utils";
 import Subject from "@/models/Subject";
 import Group from "@/models/Group";
@@ -66,7 +67,7 @@ export async function GET(request: Request) {
             .select("_id subjectId practiceDate createdAt")
             .lean()
         : Promise.resolve([]),
-      PracticeQuestion.find({ userId, scope: "personal" })
+      PracticeQuestion.find({ userId, scope: "personal", ...NATIVE_PERSONAL_QUESTION_FILTER })
         .select("_id subjectId practiceDate createdAt status")
         .lean(),
     ]);

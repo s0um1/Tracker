@@ -18,6 +18,7 @@ import Subject from "@/models/Subject";
 import PracticeQuestion from "@/models/PracticeQuestion";
 import QuestionProgress from "@/models/QuestionProgress";
 import PrepTask from "@/models/PrepTask";
+import { NATIVE_PERSONAL_QUESTION_FILTER } from "@/lib/practice-question-filters";
 import type { DashboardData } from "@/types";
 
 export async function GET(request: Request) {
@@ -60,7 +61,12 @@ export async function GET(request: Request) {
       PracticeQuestion.find({ groupId, scope: "group" })
         .select("_id subjectId practiceDate createdAt")
         .lean(),
-      PracticeQuestion.find({ userId, groupId, scope: "personal" })
+      PracticeQuestion.find({
+        userId,
+        groupId,
+        scope: "personal",
+        ...NATIVE_PERSONAL_QUESTION_FILTER,
+      })
         .select("subjectId practiceDate createdAt")
         .lean(),
       PrepTask.find({
