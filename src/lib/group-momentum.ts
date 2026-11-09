@@ -161,13 +161,20 @@ export type MomentumMember = {
   name: string;
   role: string;
   isSelf: boolean;
-  readiness: number;
   studyStreak: number;
   /** Group questions this member has completed (done and revised both count as done). */
   questionsDone: number;
   /** questionsDone as a percentage of all group questions. */
   donePercent: number;
   dots: boolean[];
+  /** Questions completed per day ("YYYY-MM-DD" -> count), only days with activity. */
+  heat: Record<string, number>;
+  /** When this member last completed a question (ISO), or null if never. */
+  lastSolvedAt: string | null;
+  /** When this member was last seen in the app (ISO), or null if unknown. */
+  lastOnlineAt: string | null;
+  /** Seen in the app within the last couple of minutes. */
+  online: boolean;
   activeDays: number;
   doneWeek: number;
   minutesWeek: number;
@@ -197,6 +204,8 @@ export type MomentumResponse = {
     totalDone: number;
     milestone: { prev: number; next: number };
     days: DayBucket[];
+    /** Questions completed per day across the whole group, only days with activity. */
+    heat: Record<string, number>;
   };
   highlights: Record<"topSolver" | "mostConsistent" | "mostFocused", (Highlight & { name: string }) | null>;
   members: MomentumMember[];

@@ -1,6 +1,6 @@
 import { withAuth } from "@/lib/api-handler";
 import { jsonOk, jsonError, istDateKey } from "@/lib/utils";
-import { isGroupMember, getGroupInsights } from "@/lib/services";
+import { isGroupMember } from "@/lib/services";
 import { canManageGroup } from "@/lib/group-roles";
 import { findBehind, type MemberActivity } from "@/lib/group-dynamics";
 import {
@@ -22,11 +22,13 @@ import User from "@/models/User";
 
 const DAY = 86_400_000;
 // Enough history for the streak and the weekly view.
-const LOOKBACK_DAYS = 60;
+const LOOKBACK_DAYS = 371;
+const ONLINE_WINDOW_MS = 2 * 60_000;
+const ROLE_ORDER: Record<string, number> = { owner: 0, admin: 1, member: 2 };
 
 /**
  * Group momentum: team streak, weekly goal, per-member activity and highlights.
- * Everyone sees activity (their dashboard already shows teammates' readiness).
+ * Everyone sees activity.
  * Who is "behind" is only shown to admins.
  */
 export const GET = withAuth(async (request, { userId }) => {
@@ -41,11 +43,10 @@ export const GET = withAuth(async (request, { userId }) => {
   const since = new Date(now.getTime() - LOOKBACK_DAYS * DAY);
   const memberIds = group.members.map((m) => String(m.userId));
 
-  const [subjects, questions, users, insights, sessions, notesWeek, sentByMe, unreadNotes] = await Promise.all([
+  const [subjects, questions, users, sessions, notesWeek, sentByMe, unreadNotes] = await Promise.all([
     Subject.find({ groupId, scope: "group", isActive: true }).select("_id name").lean(),
     PracticeQuestion.find({ groupId, scope: "group" }).select("_id subjectId").lean(),
-    User.find({ _id: { $in: memberIds } }).select("_id name studyStreak").lean(),
-    getGroupInsights(groupId, memberIds),
+    User.find({ _id: { $in: memberIds } }).select("_id name studyStreak lastSeenAt").lean(),
     StudySession.find({ groupId, userId: { $in: memberIds }, completedAt: { $gte: since } })
       .select("userId completedAt durationMinutes")
       .lean(),
@@ -67,9 +68,21 @@ export const GET = withAuth(async (request, { userId }) => {
     .lean();
 
   const events: ActivityEvent[] = [];
+  const heatByMember = new Map<string, Record<string, number>>();
+  const teamHeat: Record<string, number> = {};
+  const lastSolved = new Map<string, number>();
   for (const p of progress) {
     const at = new Date(p.lastPracticed ?? p.updatedAt);
-    if (at >= since) events.push({ userId: String(p.userId), at, kind: "question" });
+    if (at >= since) {
+      const uid = String(p.userId);
+      events.push({ userId: uid, at, kind: "question" });
+      lastSolved.set(uid, Math.max(lastSolved.get(uid) ?? 0, at.getTime()));
+      const key = istDateKey(at);
+      const mine = heatByMember.get(uid) ?? {};
+      mine[key] = (mine[key] ?? 0) + 1;
+      heatByMember.set(uid, mine);
+      teamHeat[key] = (teamHeat[key] ?? 0) + 1;
+    }
   }
   for (const s of sessions) {
     events.push({ userId: String(s.userId), at: new Date(s.completedAt), kind: "study", minutes: s.durationMinutes });
@@ -94,7 +107,9 @@ export const GET = withAuth(async (request, { userId }) => {
 
   const names = new Map(users.map((u) => [String(u._id), u.name]));
   const streaks = new Map(users.map((u) => [String(u._id), u.studyStreak ?? 0]));
-  const readiness = new Map(insights.memberStats.map((m) => [m.userId, m.readiness]));
+  const lastSeen = new Map(users.map((u) => [String(u._id), u.lastSeenAt ? new Date(u.lastSeenAt).getTime() : 0]));
+
+  const onlineNow = (id: string) => id === userId || now.getTime() - (lastSeen.get(id) ?? 0) <= ONLINE_WINDOW_MS;
 
   const activity: MemberActivity[] = memberIds.map((id) => {
     const bySubject: Record<string, number> = {};
@@ -110,6 +125,7 @@ export const GET = withAuth(async (request, { userId }) => {
       donePercent: questions.length ? Math.round(((doneCount.get(id) ?? 0) / questions.length) * 100) : 0,
       doneLast7Days: m.doneWeek,
       daysSinceActive: m.daysSinceActive,
+      daysSinceOnline: onlineNow(id) ? 0 : lastSeen.get(id) ? Math.floor((now.getTime() - lastSeen.get(id)!) / DAY) : null,
     };
   });
 
@@ -129,11 +145,14 @@ export const GET = withAuth(async (request, { userId }) => {
         name: names.get(id) ?? "Member",
         role: gm?.role ?? "member",
         isSelf: id === userId,
-        readiness: readiness.get(id) ?? 0,
         studyStreak: streaks.get(id) ?? 0,
         questionsDone: doneCount.get(id) ?? 0,
         donePercent: questions.length ? Math.round(((doneCount.get(id) ?? 0) / questions.length) * 100) : 0,
         dots: m.dots,
+        heat: heatByMember.get(id) ?? {},
+        lastSolvedAt: lastSolved.has(id) ? new Date(lastSolved.get(id)!).toISOString() : null,
+        online: onlineNow(id),
+        lastOnlineAt: lastSeen.get(id) ? new Date(lastSeen.get(id)!).toISOString() : null,
         activeDays: m.activeDays,
         doneWeek: m.doneWeek,
         minutesWeek: m.minutesWeek,
@@ -144,7 +163,10 @@ export const GET = withAuth(async (request, { userId }) => {
         behindReasons: behind.get(id) ?? [],
       };
     })
-    .sort((a, b) => Number(b.isSelf) - Number(a.isSelf) || b.doneWeek - a.doneWeek || a.name.localeCompare(b.name));
+    .sort(
+      (a, b) =>
+        (ROLE_ORDER[a.role] ?? 2) - (ROLE_ORDER[b.role] ?? 2) || a.name.localeCompare(b.name)
+    );
 
   const goal = memberIds.length * WEEKLY_GOAL_PER_MEMBER;
   const goalPct = goal ? Math.round((momentum.doneWeek / goal) * 100) : 0;
@@ -173,6 +195,7 @@ export const GET = withAuth(async (request, { userId }) => {
       totalDone,
       milestone: nextMilestone(totalDone),
       days: momentum.days,
+      heat: teamHeat,
     },
     highlights: {
       topSolver: highlight(momentum.highlights.topSolver),

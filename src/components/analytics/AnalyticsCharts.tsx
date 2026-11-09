@@ -61,18 +61,13 @@ export default function AnalyticsCharts({ data, currentUserId }: AnalyticsCharts
             hint="Your shared questions"
           />
           <StatCard label="Your points" value={group.summary.yourPoints} />
-          <StatCard
-            label="Readiness"
-            value={`${group.summary.yourReadiness}%`}
-            hint={`Team avg ${group.summary.avgReadiness}%`}
-          />
           <StatCard label="Members" value={group.summary.memberCount} />
         </div>
         <Card>
           <CardHeader title="Group questions" subtitle="Your progress on shared questions" />
           <StatusList rows={group.byStatus} />
         </Card>
-        {(group.leaderboard.length > 0 || group.memberReadiness.length > 0) && (
+        {group.leaderboard.length > 0 && (
           <div className="grid gap-6 lg:grid-cols-2">
             {group.leaderboard.length > 0 && (
               <Card>
@@ -92,28 +87,6 @@ export default function AnalyticsCharts({ data, currentUserId }: AnalyticsCharts
                         {currentUserId === m.userId ? " (you)" : ""}
                       </Link>
                       <span className="font-semibold text-brand">{m.points} pts</span>
-                    </li>
-                  ))}
-                </ul>
-              </Card>
-            )}
-            {group.memberReadiness.length > 0 && (
-              <Card>
-                <CardHeader title="Member readiness" />
-                <ul className="space-y-2">
-                  {group.memberReadiness.map((m) => (
-                    <li
-                      key={m.userId}
-                      className="flex items-center justify-between rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
-                    >
-                      <Link
-                        href={`/users/${m.userId}`}
-                        className="font-medium text-brand hover:underline"
-                      >
-                        {m.name}
-                        {currentUserId === m.userId ? " (you)" : ""}
-                      </Link>
-                      <span className="font-semibold text-brand">{m.readiness}%</span>
                     </li>
                   ))}
                 </ul>

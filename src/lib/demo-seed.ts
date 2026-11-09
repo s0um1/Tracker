@@ -268,7 +268,6 @@ async function ensureMemberDoneQuestions(
           status: "done",
           confidence: "okay",
           lastPracticed: daysFromNow(-2),
-          nextReviewAt: daysFromNow(-1),
         },
         { upsert: true }
       );
@@ -607,13 +606,13 @@ export async function ensureDemoData() {
   }
 
   for (const userId of allMemberIds) {
-    for (const [i, q] of questions.entries()) {
+    for (const q of questions) {
       const isDone = Math.random() > 0.4;
       await QuestionProgress.create({
         userId,
         questionId: q._id,
         ...(isDone
-          ? { status: Math.random() > 0.7 ? "revised" : "done", nextReviewAt: daysFromNow(-(i % 3)) }
+          ? { status: Math.random() > 0.7 ? "revised" : "done" }
           : { status: "in_progress" }),
         confidence: Math.random() > 0.5 ? "okay" : "strong",
         lastPracticed: daysFromNow(-3),

@@ -162,10 +162,6 @@ export default function ShortcutsAndCapture() {
             </li>
           ))}
           <li className="flex justify-between">
-            <span>Revision: reveal / rate</span>
-            <span className="text-xs">Space, then 1–4</span>
-          </li>
-          <li className="flex justify-between">
             <span>This help</span>
             <kbd className="rounded bg-[var(--surface-muted)] px-1.5 text-xs">?</kbd>
           </li>

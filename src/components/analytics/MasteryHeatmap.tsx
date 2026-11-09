@@ -15,7 +15,7 @@ export default function MasteryHeatmap({ subjects }: { subjects: SubjectMastery[
   return (
     <Card>
       <CardHeader
-        title="Readiness by subject"
+        title="Mastery by subject"
         subtitle="Completed questions weighted by your confidence. Weakest first."
       />
       {subjects.length === 0 ? (
@@ -34,7 +34,7 @@ export default function MasteryHeatmap({ subjects }: { subjects: SubjectMastery[
                   <span className="text-lg font-bold">{s.mastery}%</span>
                 </div>
                 <div className="mt-1 text-xs opacity-80">
-                  {s.done}/{s.total} done{s.due > 0 ? ` · ${s.due} due for review` : ""}
+                  {s.done}/{s.total} done
                 </div>
               </Link>
             </li>

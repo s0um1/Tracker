@@ -7,12 +7,13 @@ import toast from "react-hot-toast";
 import Card, { CardHeader } from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
-import ProgressBar, { ReadinessRing } from "@/components/ui/ProgressBar";
+import ProgressBar, { ProgressRing } from "@/components/ui/ProgressBar";
+import { Heatmap, HeatLegend, WeekHeatmap } from "@/components/ui/Heatmap";
 import NotesInbox from "@/components/groups/NotesInbox";
 import { apiGet, apiPost, getErrorMessage } from "@/lib/api";
 import { formatGroupRoleLabel } from "@/lib/group-roles";
 import { CHEER_EMOJIS, NOTE_MAX_LENGTH, NUDGE_PRESETS } from "@/lib/group-notes";
-import type { MemberStatus, MomentumMember, MomentumResponse } from "@/lib/group-momentum";
+import type { MomentumMember, MomentumResponse } from "@/lib/group-momentum";
 
 const AVATAR_TONES = [
   "bg-brand/15 text-brand",
@@ -43,19 +44,27 @@ function hours(minutes: number) {
   return minutes % 60 ? `${h}h ${minutes % 60}m` : `${h}h`;
 }
 
-const STATUS_STYLE: Record<MemberStatus, { dot: string; text: string }> = {
-  today: { dot: "bg-emerald-500", text: "text-emerald-600" },
-  recent: { dot: "bg-sky-500", text: "text-sky-600" },
-  quiet: { dot: "bg-amber-500", text: "text-amber-600" },
-  away: { dot: "bg-stone-400", text: "text-[var(--muted)]" },
-};
+function timeAgo(iso: string) {
+  const mins = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60_000));
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return days === 1 ? "yesterday" : `${days}d ago`;
+}
 
-function statusLabel(m: MomentumMember) {
-  if (m.daysSinceActive === null) return "Hasn't started yet";
-  if (m.daysSinceActive === 0) return "Active today";
-  if (m.daysSinceActive === 1) return "Active yesterday";
-  if (m.status === "recent") return `Active ${m.daysSinceActive} days ago`;
-  return m.status === "away" ? `Away for ${m.daysSinceActive} days` : `Quiet for ${m.daysSinceActive} days`;
+function lastOnlineLabel(m: MomentumMember) {
+  return `Last online ${timeAgo(m.lastOnlineAt!)}`;
+}
+
+/** Highlight in red when nothing has been solved for a few days (or ever). */
+function solvedStale(m: MomentumMember) {
+  return !m.lastSolvedAt || Date.now() - new Date(m.lastSolvedAt).getTime() >= 3 * 86_400_000;
+}
+
+function lastSolvedLabel(m: MomentumMember) {
+  return m.lastSolvedAt ? `Last solved ${timeAgo(m.lastSolvedAt)}` : "No questions solved yet";
 }
 
 /** Weekday letter for a "YYYY-MM-DD" key, in the app's timezone. */
@@ -63,37 +72,24 @@ function weekday(key: string) {
   return new Date(`${key}T12:00:00+05:30`).toLocaleDateString("en-IN", { weekday: "short", timeZone: "Asia/Kolkata" });
 }
 
-function WeekDots({ dots }: { dots: boolean[] }) {
-  return (
-    <div className="flex items-center gap-1" role="img" aria-label={`Active ${dots.filter(Boolean).length} of the last 7 days`}>
-      {dots.map((on, i) => (
-        <span
-          key={i}
-          className={clsx(
-            "h-2.5 w-2.5 rounded-full",
-            on ? "bg-brand" : "bg-[var(--surface-muted)] ring-1 ring-inset ring-[var(--border)]",
-            i === dots.length - 1 && "ring-2 ring-brand/30"
-          )}
-        />
-      ))}
-    </div>
-  );
-}
-
 function MemberCard({
   member,
   totalQuestions,
+  todayKey,
   isAdmin,
   onCheer,
   onNudge,
 }: {
   member: MomentumMember;
   totalQuestions: number;
+  todayKey: string;
   isAdmin: boolean;
   onCheer: (m: MomentumMember, emoji: string) => void;
   onNudge: (m: MomentumMember) => void;
 }) {
-  const style = STATUS_STYLE[member.status];
+  const style = member.online
+    ? { dot: "bg-emerald-500", text: "text-emerald-600" }
+    : { dot: "bg-stone-400", text: "text-[var(--muted)]" };
   const cheered = member.sentToday.includes("cheer");
   const nudged = member.sentToday.includes("nudge");
 
@@ -115,7 +111,16 @@ function MemberCard({
             {member.isSelf && <span className="rounded-full bg-brand/15 px-1.5 py-0.5 text-[10px] font-semibold text-brand">You</span>}
           </div>
           <p className="text-[11px] text-[var(--muted)]">{formatGroupRoleLabel(member.role)}</p>
-          <p className={clsx("mt-0.5 text-xs font-medium", style.text)}>{statusLabel(member)}</p>
+          {member.online ? (
+            <p className={clsx("mt-0.5 text-xs font-medium", style.text)}>Online now</p>
+          ) : (
+            <>
+              {member.lastOnlineAt && <p className="mt-0.5 text-xs text-[var(--muted)]">{lastOnlineLabel(member)}</p>}
+              <p className={clsx("text-xs font-medium", solvedStale(member) ? "text-red-500" : "text-[var(--muted)]")}>
+                {lastSolvedLabel(member)}
+              </p>
+            </>
+          )}
         </div>
         {member.studyStreak > 0 && (
           <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-orange-500/15 px-2 py-0.5 text-[11px] font-semibold text-orange-600">
@@ -124,12 +129,12 @@ function MemberCard({
         )}
       </div>
 
-      <div className="flex items-center justify-between gap-3">
-        <WeekDots dots={member.dots} />
-        <p className="text-xs text-[var(--muted)]">
+      <div>
+        <p className="mb-2 text-xs text-[var(--muted)]">
           <span className="font-semibold text-[var(--foreground)]">{member.doneWeek}</span> this week
           {member.minutesWeek > 0 && <> · {hours(member.minutesWeek)}</>}
         </p>
+        <WeekHeatmap heat={member.heat} todayKey={todayKey} label={`${member.name}'s questions completed this week`} />
       </div>
 
       <div>
@@ -143,9 +148,6 @@ function MemberCard({
           <span className="font-semibold">{member.donePercent}%</span>
         </div>
         <ProgressBar value={member.donePercent} size="sm" />
-        <p className="mt-1.5 text-[11px] text-[var(--muted)]">
-          Readiness <span className="font-semibold text-[var(--foreground)]">{member.readiness}%</span>
-        </p>
       </div>
 
       {member.behindReasons.length > 0 && (
@@ -276,6 +278,7 @@ export default function GroupMomentumPanel({ groupId }: { groupId: string }) {
   const maxQuestions = Math.max(1, ...team.days.map((d) => d.questions));
   const milestoneSpan = team.milestone.next - team.milestone.prev;
   const milestonePct = milestoneSpan ? Math.round(((team.totalDone - team.milestone.prev) / milestoneSpan) * 100) : 0;
+  const todayKey = team.days.find((d) => d.isToday)?.key ?? team.days[team.days.length - 1].key;
   const highlightRows = [
     { key: "topSolver", icon: Trophy, label: "Top solver", h: highlights.topSolver, unit: (v: number) => `${v} solved` },
     { key: "mostConsistent", icon: Medal, label: "Most consistent", h: highlights.mostConsistent, unit: (v: number) => `${v}/7 days` },
@@ -302,7 +305,7 @@ export default function GroupMomentumPanel({ groupId }: { groupId: string }) {
           </div>
           <div className="flex shrink-0 items-center gap-4">
             <div className="text-center">
-              <ReadinessRing value={goalPct} size={92} />
+              <ProgressRing value={goalPct} size={92} />
               <p className="mt-1 text-[11px] text-[var(--muted)]">
                 Weekly goal · {team.doneWeek}/{team.goal}
               </p>
@@ -316,11 +319,11 @@ export default function GroupMomentumPanel({ groupId }: { groupId: string }) {
       <div className="grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader title="This week" subtitle="Questions completed each day, plus how many teammates showed up" />
-          <div className="flex h-36 items-end gap-2 sm:gap-3" role="img" aria-label="Questions completed per day this week">
+          <div className="mt-6 flex items-end gap-2 sm:gap-3" role="img" aria-label="Questions completed per day this week">
             {team.days.map((d) => (
               <div key={d.key} className="flex flex-1 flex-col items-center gap-1.5">
                 <span className="text-[11px] font-semibold">{d.questions || ""}</span>
-                <div className="flex h-24 w-full items-end">
+                <div className="flex h-44 w-full items-end">
                   <div
                     className={clsx(
                       "w-full rounded-t-md transition-all",
@@ -362,13 +365,18 @@ export default function GroupMomentumPanel({ groupId }: { groupId: string }) {
               <span className="text-[var(--muted)]">{team.milestone.prev}</span>
               <span className="font-semibold">{team.milestone.next} questions</span>
             </div>
-            <ProgressBar value={milestonePct} />
+            <ProgressBar value={milestonePct} size="lg" tone="brand" />
             <p className="mt-2 text-xs text-[var(--muted)]">
               {Math.max(0, team.milestone.next - team.totalDone)} more to go as a team.
             </p>
           </Card>
         </div>
       </div>
+
+      <Card>
+        <CardHeader title="Group activity" subtitle="Questions the team completed each day" action={<HeatLegend />} />
+        <Heatmap heat={team.heat} todayKey={todayKey} label="Group questions completed over time" />
+      </Card>
 
       <div>
         <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
@@ -379,7 +387,7 @@ export default function GroupMomentumPanel({ groupId }: { groupId: string }) {
         </div>
         <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {members.map((m) => (
-            <MemberCard key={m.userId} member={m} totalQuestions={team.totalQuestions} isAdmin={data.isAdmin} onCheer={cheer} onNudge={(t) => { setNudgeText(NUDGE_PRESETS[0]); setNudgeTarget(t); }} />
+            <MemberCard key={m.userId} member={m} totalQuestions={team.totalQuestions} todayKey={todayKey} isAdmin={data.isAdmin} onCheer={cheer} onNudge={(t) => { setNudgeText(NUDGE_PRESETS[0]); setNudgeTarget(t); }} />
           ))}
         </ul>
       </div>

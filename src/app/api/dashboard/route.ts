@@ -80,8 +80,6 @@ export async function GET(request: Request) {
         .lean(),
     ]);
 
-    const readiness = memberStats.find((m) => m.userId === userId)?.readiness ?? 0;
-
     const questionProgress =
       groupQuestions.length > 0 && memberIds.length > 0
         ? await QuestionProgress.find({
@@ -143,20 +141,13 @@ export async function GET(request: Request) {
       .sort((a, b) => a.completionPercent - b.completionPercent)
       .slice(0, 3);
 
-    const groupReadiness =
-      memberStats.length > 0
-        ? Math.round(memberStats.reduce((s, m) => s + m.readiness, 0) / memberStats.length)
-        : 0;
-
     const data: DashboardData = {
       countdown: {
         ...countdown,
         interviewDate: group.interviewDate?.toISOString() ?? null,
       },
-      readiness,
       todayQuestions,
       weakSubjects: weakSubjects as unknown as DashboardData["weakSubjects"],
-      groupReadiness,
       memberStats,
       upcomingDeadlines: pendingTasks.map((t) => ({
         label: t.title,

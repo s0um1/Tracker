@@ -11,17 +11,11 @@ import {
   triggerQuestionPointsBurst,
   type QuestionPointBurst,
 } from "@/lib/question-points-burst";
-import { ReadinessCard } from "@/components/dashboard/CountdownBanner";
 import InspirationCard from "@/components/dashboard/InspirationCard";
 import NotesInbox from "@/components/groups/NotesInbox";
-import SmartPlanCard from "@/components/dashboard/SmartPlanCard";
-import { usePrepInsights } from "@/lib/use-prep-insights";
 import TodayPlanCard from "@/components/dashboard/TodayPlanCard";
-import FocusTimer from "@/components/focus/FocusTimer";
 import Card, { CardHeader } from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
-import ProgressBar from "@/components/ui/ProgressBar";
-import { ConfidenceBadge } from "@/components/ui/Badge";
 import PageHeader from "@/components/ui/PageHeader";
 import { DashboardSkeleton, ErrorState, EmptyState } from "@/components/ui/StateViews";
 import type { DashboardData, QuestionStatus } from "@/types";
@@ -36,7 +30,6 @@ export default function DashboardPage() {
   const [memberPage, setMemberPage] = useState(1);
 
   const activeGroupId = user?.activeGroupId;
-  const { data: insights } = usePrepInsights(Boolean(activeGroupId));
   const memberPageItems = useMemo(
     () => sliceTablePage(data?.memberStats ?? [], memberPage, TABLE_PAGE_SIZE),
     [data?.memberStats, memberPage]
@@ -176,7 +169,6 @@ export default function DashboardPage() {
               <thead>
                 <tr className="table-head">
                   <th className="pb-2 font-medium">Member</th>
-                  <th className="pb-2 font-medium">Readiness</th>
                   <th className="pb-2 font-medium">Tasks Done</th>
                 </tr>
               </thead>
@@ -188,7 +180,6 @@ export default function DashboardPage() {
                         {m.name}
                       </Link>
                     </td>
-                    <td className="py-2">{m.readiness}%</td>
                     <td className="py-2">{m.tasksCompleted}</td>
                   </tr>
                 ))}
@@ -210,77 +201,17 @@ export default function DashboardPage() {
 
       <NotesInbox groupId={user!.activeGroupId!} compact />
 
-      <SmartPlanCard insights={insights} />
-
       <TodayPlanCard
         todayQuestions={data.todayQuestions}
         onStatusChange={updateQuestionStatus}
         pointBurst={pointBurst}
       />
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div id="focus-timer">
-          <FocusTimer
-            groupId={user!.activeGroupId}
-            label="Start a focus session"
-            onComplete={() => load(true)}
-          />
-        </div>
-
-        <Card>
-          <CardHeader
-            title="Focus Areas"
-            action={<Link href="/subjects"><Button variant="ghost" size="sm">View All</Button></Link>}
-          />
-          {data.weakSubjects.length === 0 ? (
-            <p className="text-sm text-[var(--muted)]">No weak subjects detected. Keep it up!</p>
-          ) : (
-            <div className="space-y-3">
-              {data.weakSubjects.map((s) => (
-                <div key={s._id} className="rounded-xl border border-[var(--border)] p-3 ">
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium text-[var(--foreground)]">{s.name}</span>
-                    <ConfidenceBadge confidence={s.confidence} />
-                  </div>
-                  <ProgressBar value={s.completionPercent} className="mt-2" />
-                  <p className="mt-1 text-xs text-[var(--muted)]">
-                    {s.questionCount}{s.totalQuestions > 0 ? ` / ${s.totalQuestions}` : ""} questions · {s.completionPercent}% prepared
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-      </div>
-
       <InspirationCard
-        readiness={data.readiness}
         studyStreak={data.studyStreak}
         daysToInterview={data.countdown.days}
         targetCtcLpa={user?.targetCtcLpa}
       />
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        <ReadinessCard readiness={data.readiness} />
-        <Card>
-          <CardHeader title="Quick Stats" />
-          <div className="grid grid-cols-2 gap-4">
-            <Stat label="Questions Today" value={String(data.questionsToday)} />
-            <Stat label="Study Streak" value={`${data.studyStreak} days`} />
-            <Stat label="Group Readiness" value={`${data.groupReadiness ?? 0}%`} />
-          </div>
-        </Card>
-      </div>
-
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="surface-muted p-3">
-      <p className="text-xs text-[var(--muted)]">{label}</p>
-      <p className="mt-0.5 text-lg font-bold text-[var(--foreground)]">{value}</p>
     </div>
   );
 }

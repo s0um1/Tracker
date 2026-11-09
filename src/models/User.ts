@@ -14,6 +14,7 @@ export interface IUser extends Document {
   theme: "light" | "dark" | "system";
   studyStreak: number;
   lastStudyDate?: Date;
+  lastSeenAt?: Date;
   targetCtcLpa?: number;
   targetCompany?: string;
   targetRole?: string;
@@ -41,6 +42,7 @@ const UserSchema = new Schema<IUser>(
     theme: { type: String, enum: ["light", "dark", "system"], default: "system" },
     studyStreak: { type: Number, default: 0 },
     lastStudyDate: { type: Date },
+    lastSeenAt: { type: Date },
     targetCtcLpa: { type: Number, min: 0 },
     targetCompany: { type: String, trim: true, maxlength: 120 },
     targetRole: { type: String, trim: true, maxlength: 120 },

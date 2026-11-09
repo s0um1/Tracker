@@ -63,12 +63,19 @@ export default function Sidebar() {
       <div className="shrink-0 border-t border-[var(--border)] p-4">
         <ThemeToggle className="mb-3 w-full justify-center" showLabel />
         {user && (
-          <>
+          <Link
+            href={`/users/${user._id}`}
+            className={clsx(
+              "-m-2 block rounded-xl p-2 transition-colors hover:bg-[var(--surface-muted)]",
+              pathname === `/users/${user._id}` && "bg-[var(--surface-muted)]"
+            )}
+            aria-label="Open your profile"
+          >
             <div className="text-sm font-medium text-[var(--foreground)]">{user.name}</div>
             <div className="text-xs text-[var(--muted)]">
               {user.username ? `@${user.username}` : user.email || "Shared account"}
             </div>
-          </>
+          </Link>
         )}
       </div>
     </aside>

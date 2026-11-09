@@ -13,7 +13,6 @@ export type DailyPlanInput = {
   daysLeft: number | null;
   isPast?: boolean;
   availableMinutes: number;
-  dueReviews: number;
   /** Subjects sorted weakest first. */
   weakSubjects: { name: string; mastery: number }[];
   pendingTodayQuestions: number;
@@ -29,7 +28,7 @@ export function planModeFor(daysLeft: number | null, isPast = false): PlanMode {
 }
 
 const MODE_COPY: Record<PlanMode, string> = {
-  steady: "Steady pace — build coverage and keep reviews current.",
+  steady: "Steady pace — build coverage and keep your question count moving.",
   crunch: "Crunch time — weak areas and revision come before new material.",
   sprint: "Final sprint — no new topics. Review, mock, and rest.",
   post: "Interview date has passed — set a new date in Settings to re-plan.",
@@ -61,17 +60,6 @@ export function buildDailyPlan(input: DailyPlanInput): { mode: PlanMode; items: 
       reason: "Your group mock is scheduled for today.",
       minutes: 45,
       href: "/groups",
-    });
-  }
-
-  if (input.dueReviews > 0) {
-    const count = Math.min(input.dueReviews, mode === "sprint" ? 25 : 15);
-    add({
-      id: "reviews",
-      title: `Review ${count} due question${count === 1 ? "" : "s"}`,
-      reason: "Spaced repetition: these are about to fade.",
-      minutes: Math.max(5, count * 2),
-      href: "/revision",
     });
   }
 

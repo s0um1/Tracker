@@ -26,12 +26,10 @@ const TONE_STYLES: Record<InspirationTone, { label: string; border: string; vari
 };
 
 export default function InspirationCard({
-  readiness,
   studyStreak,
   daysToInterview,
   targetCtcLpa,
 }: {
-  readiness: number;
   studyStreak: number;
   daysToInterview: number;
   targetCtcLpa?: number;
@@ -41,13 +39,12 @@ export default function InspirationCard({
   const message = useMemo(
     () =>
       pickInspiration({
-        readiness,
         studyStreak,
         daysToInterview,
         targetCtcLpa,
         seed,
       }),
-    [readiness, studyStreak, daysToInterview, targetCtcLpa, seed]
+    [studyStreak, daysToInterview, targetCtcLpa, seed]
   );
 
   const style = TONE_STYLES[message.tone];

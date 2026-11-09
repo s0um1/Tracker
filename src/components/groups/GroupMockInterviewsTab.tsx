@@ -11,7 +11,7 @@ import Card, { CardHeader } from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
 import Chip from "@/components/ui/Chip";
-import ProgressBar, { ReadinessRing } from "@/components/ui/ProgressBar";
+import ProgressBar, { ProgressRing } from "@/components/ui/ProgressBar";
 import { MockInterviewsSkeleton, ErrorState } from "@/components/ui/StateViews";
 import { formatDate, formatDateTime, parseAppDateTime, toDateTimeLocalValue } from "@/lib/utils";
 import toast from "react-hot-toast";
@@ -314,7 +314,7 @@ export default function GroupMockInterviewsTab({
             >
               <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex min-w-0 flex-1 items-center gap-4">
-                  <ReadinessRing value={completionPct} size={88} />
+                  <ProgressRing value={completionPct} size={88} />
                   <div className="min-w-0">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
                       {viewMode === "history" ? "Past round" : "Upcoming round"}

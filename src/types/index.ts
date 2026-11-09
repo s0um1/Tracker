@@ -302,7 +302,6 @@ export interface TopicWithProgress extends Topic {
 
 export interface GroupWithStats extends Group {
   memberCount: number;
-  readiness: number;
   memberStats?: MemberStat[];
   weakAreas?: string[];
 }
@@ -311,7 +310,6 @@ export interface MemberStat {
   userId: string;
   username?: string;
   name: string;
-  readiness: number;
   tasksCompleted: number;
   role?: GroupRole;
 }
@@ -339,7 +337,6 @@ export interface UserProfile {
   preparationLevel: PreparationLevel;
   studyStreak: number;
   dailyStudyMinutes: number;
-  readiness: number;
   tasksCompleted: number;
   tasksTotal: number;
   sharedGroups: { _id: string; name: string }[];
@@ -356,6 +353,8 @@ export interface UserProfile {
     daysSinceActive: number | null;
     studyMinutesWeek: number;
     studyMinutesTotal: number;
+    /** Questions completed per day ("YYYY-MM-DD" -> count). */
+    heat: Record<string, number>;
   } | null;
   subjects?: { name: string; mastery: number; done: number; total: number }[];
   mock?: {
@@ -381,10 +380,8 @@ export interface TodayQuestion {
 
 export interface DashboardData {
   countdown: { days: number; hours: number; totalHours: number; interviewDate: string | null };
-  readiness: number;
   todayQuestions: { group: TodayQuestion[]; personal: TodayQuestion[] };
   weakSubjects: SubjectWithStats[];
-  groupReadiness?: number;
   memberStats?: MemberStat[];
   upcomingDeadlines: { label: string; date: string; priority: Priority }[];
   studyStreak: number;
@@ -415,7 +412,6 @@ export interface AnalyticsData {
   topicStatusBreakdown: { status: string; count: number }[];
   mockInterviewScores: { date: string; score: number; subject: string }[];
   groupStats?: {
-    avgReadiness: number;
     weakSubjects: string[];
   };
   personal: {
@@ -437,8 +433,6 @@ export interface AnalyticsData {
       totalQuestions: number;
       yourDone: number;
       yourPoints: number;
-      yourReadiness: number;
-      avgReadiness: number;
       memberCount: number;
     };
     byStatus: AnalyticsQuestionStatusRow[];
@@ -446,6 +440,5 @@ export interface AnalyticsData {
     activity: AnalyticsActivityDay[];
     pointsTrend: AnalyticsActivityDay[];
     leaderboard: { userId: string; name: string; points: number }[];
-    memberReadiness: { userId: string; name: string; readiness: number }[];
   };
 }

@@ -13,11 +13,10 @@ import MockInterviewSlot from "@/models/MockInterviewSlot";
 import MockInterviewRound from "@/models/MockInterviewRound";
 import StudySession from "@/models/StudySession";
 import PreparationPlan from "@/models/PreparationPlan";
-import type { Confidence, GroupRole } from "@/types";
+import type { GroupRole } from "@/types";
 import { canManageGroup } from "@/lib/group-roles";
 
 export { canManageGroup };
-import { calculateReadiness, getInterviewCountdown } from "./readiness";
 import {
   formatSubjectTrack,
   generateJoinCode,
@@ -27,7 +26,6 @@ import {
   questionDatePeriodRange,
   serializeDoc,
   startOfDay,
-  normalizeTopicStatus,
 } from "./utils";
 import { questionProgressFields, questionStatusForUser } from "./question-progress";
 import { NATIVE_PERSONAL_QUESTION_FILTER } from "./practice-question-filters";
@@ -133,58 +131,16 @@ function memberStatsFromContext(
   roleMap: Map<string, GroupRole> | undefined,
   ctx: GroupStatsContext
 ): MemberStat[] {
-  const countdown = ctx.group
-    ? getInterviewCountdown(ctx.group.interviewDate)
-    : { days: 14, hours: 0, totalHours: 336, isPast: false };
-
   const userMap = new Map(ctx.users.map((u) => [String(u._id), u]));
   const taskStatsMap = new Map(ctx.taskStats.map((t) => [String(t._id), t]));
 
-  const progressByUser = new Map<string, typeof ctx.topicProgress>();
-  for (const p of ctx.topicProgress) {
-    const uid = String(p.userId);
-    const list = progressByUser.get(uid) ?? [];
-    list.push(p);
-    progressByUser.set(uid, list);
-  }
-
-  const mocksByUser = new Map<string, typeof ctx.mocks>();
-  for (const m of ctx.mocks) {
-    const uid = String(m.userId);
-    const list = mocksByUser.get(uid) ?? [];
-    list.push(m);
-    mocksByUser.set(uid, list);
-  }
-
   return memberIds.map((userId) => {
-    const userProgress = progressByUser.get(userId) ?? [];
-    const progressMap = new Map(userProgress.map((p) => [String(p.topicId), p]));
-
-    const topicData = ctx.topics.map((t) => {
-      const p = progressMap.get(String(t._id));
-      return {
-        status: normalizeTopicStatus(p?.status ?? t.status),
-        confidence: (p?.confidence ?? t.confidence) as Confidence,
-      };
-    });
-
-    const userMocks = mocksByUser.get(userId) ?? [];
     const user = userMap.get(userId);
     const stats = taskStatsMap.get(userId);
-
-    const readiness = calculateReadiness({
-      topics: topicData,
-      tasksCompleted: stats?.completed ?? 0,
-      tasksTotal: stats?.total ?? 0,
-      mockScores: userMocks.map((m) => m.score),
-      studyStreak: user?.studyStreak ?? 0,
-      daysUntilInterview: countdown.days,
-    });
 
     return {
       userId,
       name: user?.name ?? "Unknown",
-      readiness,
       tasksCompleted: stats?.completed ?? 0,
       role: roleMap?.get(userId),
     };
@@ -219,38 +175,6 @@ function gamificationFromContext(memberIds: string[], ctx: GroupStatsContext): G
   });
 
   return buildGroupGamification(members);
-}
-
-export async function getUserReadiness(userId: string, groupId: string): Promise<number> {
-  const topics = await Topic.find({ groupId }).lean();
-  const progress = await TopicProgress.find({ userId, topicId: { $in: topics.map((t) => t._id) } }).lean();
-  const progressMap = new Map(progress.map((p) => [String(p.topicId), p]));
-
-  const topicData = topics.map((t) => {
-    const p = progressMap.get(String(t._id));
-    return {
-      status: normalizeTopicStatus(p?.status ?? t.status),
-      confidence: (p?.confidence ?? t.confidence) as Confidence,
-    };
-  });
-
-  const tasks = await PrepTask.find({ userId, groupId }).lean();
-  const mocks = await MockInterview.find({ userId, groupId }).lean();
-  const user = await User.findById(userId).lean();
-  const group = await Group.findById(groupId).lean();
-
-  const countdown = group
-    ? getInterviewCountdown(group.interviewDate)
-    : { days: 14, hours: 0, totalHours: 336, isPast: false };
-
-  return calculateReadiness({
-    topics: topicData,
-    tasksCompleted: tasks.filter((t) => t.status === "completed").length,
-    tasksTotal: tasks.length,
-    mockScores: mocks.map((m) => m.score),
-    studyStreak: user?.studyStreak ?? 0,
-    daysUntilInterview: countdown.days,
-  });
 }
 
 export async function seedGroupSubjects(groupId: string, subjectNames: string[]) {
@@ -622,7 +546,6 @@ export async function clearActiveGroupForMembers(groupId: string) {
 export interface MemberStat {
   userId: string;
   name: string;
-  readiness: number;
   tasksCompleted: number;
   role?: GroupRole;
 }
@@ -652,14 +575,6 @@ export async function getMemberStatsBatch(
   const ctx = await loadGroupStatsContext(groupId, memberIds);
   if (!ctx) return [];
   return memberStatsFromContext(memberIds, roleMap, ctx);
-}
-
-export async function getUserReadinessBatch(
-  userIds: string[],
-  groupId: string
-): Promise<Map<string, number>> {
-  const stats = await getMemberStatsBatch(userIds, groupId);
-  return new Map(stats.map((s) => [s.userId, s.readiness]));
 }
 
 export async function getGroupGamificationStats(

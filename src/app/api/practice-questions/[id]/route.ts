@@ -8,7 +8,6 @@ import {
   isQuestionStatusPracticed,
   resolveQuestionBody,
 } from "@/lib/utils";
-import { firstReviewDate } from "@/lib/spaced-repetition";
 import { applyFirstDonePoints } from "@/lib/question-gamification";
 import { questionProgressFields } from "@/lib/question-progress";
 import {
@@ -55,12 +54,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       if (nextStatus) {
         progressUpdates.status = nextStatus;
         if (isQuestionStatusPracticed(nextStatus)) progressUpdates.lastPracticed = new Date();
-        if (
-          (nextStatus === "done" || nextStatus === "revised") &&
-          !existing?.nextReviewAt
-        ) {
-          progressUpdates.nextReviewAt = firstReviewDate();
-        }
         if (nextStatus === "done" || nextStatus === "revised") {
           const award = applyFirstDonePoints(
             prevStatus,

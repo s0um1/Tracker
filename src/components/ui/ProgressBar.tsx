@@ -1,16 +1,25 @@
 import clsx from "clsx";
-import { getReadinessBarColor } from "@/lib/readiness";
+
+function barColor(percent: number): string {
+  if (percent >= 80) return "bg-emerald-500";
+  if (percent >= 60) return "bg-amber-500";
+  if (percent >= 40) return "bg-orange-500";
+  return "bg-red-500";
+}
 
 export default function ProgressBar({
   value,
   className,
   showLabel = false,
   size = "md",
+  tone = "auto",
 }: {
   value: number;
   className?: string;
   showLabel?: boolean;
   size?: "sm" | "md" | "lg";
+  /** "auto" colours by percentage; "brand" always uses the accent colour. */
+  tone?: "auto" | "brand";
 }) {
   const clamped = Math.min(100, Math.max(0, value));
   const heights = { sm: "h-1.5", md: "h-2.5", lg: "h-4" };
@@ -25,20 +34,20 @@ export default function ProgressBar({
       )}
       <div
         className={clsx(
-          "w-full overflow-hidden rounded-full bg-[var(--surface-muted)]",
+          "w-full overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--foreground)_14%,transparent)]",
           heights[size]
         )}
       >
         <div
-          className={clsx("h-full rounded-full transition-all duration-500", getReadinessBarColor(clamped))}
-          style={{ width: `${clamped}%` }}
+          className={clsx("h-full rounded-full transition-all duration-500", tone === "brand" ? "bg-brand" : barColor(clamped))}
+          style={{ width: clamped > 0 ? `max(${clamped}%, 0.5rem)` : 0 }}
         />
       </div>
     </div>
   );
 }
 
-export function ReadinessRing({ value, size = 120 }: { value: number; size?: number }) {
+export function ProgressRing({ value, size = 120 }: { value: number; size?: number }) {
   const clamped = Math.min(100, Math.max(0, value));
   const stroke = 8;
   const radius = (size - stroke) / 2;

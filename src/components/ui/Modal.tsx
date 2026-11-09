@@ -54,7 +54,6 @@ export default function Modal({
     >
       <div
         className="absolute inset-0 z-0 animate-fade-in bg-[var(--overlay)]"
-        onClick={onClose}
         aria-hidden
       />
       <div

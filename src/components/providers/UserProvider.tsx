@@ -50,6 +50,22 @@ export function UserProvider({ children }: { children: ReactNode }) {
     refreshUser();
   }, [refreshUser]);
 
+  // Presence heartbeat: lets teammates see who is online. Only pings while the tab is visible.
+  const signedIn = Boolean(user?._id);
+  useEffect(() => {
+    if (!signedIn) return;
+    const ping = () => {
+      if (document.visibilityState === "visible") void apiPost("/api/presence").catch(() => {});
+    };
+    ping();
+    const id = window.setInterval(ping, 60_000);
+    document.addEventListener("visibilitychange", ping);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", ping);
+    };
+  }, [signedIn]);
+
   const updateUser = useCallback(async (updates: Partial<User>) => {
     if (!user) throw new Error("Not signed in");
     const updated = await apiPatch<User>(`/api/users/${user._id}`, updates);

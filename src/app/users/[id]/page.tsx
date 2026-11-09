@@ -7,9 +7,10 @@ import { CalendarDays, Flame, Settings, Target } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import Card, { CardHeader } from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
-import ProgressBar, { ReadinessRing } from "@/components/ui/ProgressBar";
+import ProgressBar from "@/components/ui/ProgressBar";
 import { ProfilePageSkeleton, ErrorState } from "@/components/ui/StateViews";
-import { formatDate } from "@/lib/utils";
+import { Heatmap, HeatLegend } from "@/components/ui/Heatmap";
+import { formatDate, istDateKey } from "@/lib/utils";
 import type { UserProfile } from "@/types";
 
 function initials(name: string) {
@@ -151,10 +152,6 @@ export default function UserProfilePage() {
             </div>
           </div>
           <div className="flex items-center justify-between gap-4 sm:flex-col sm:items-end">
-            <div className="text-center">
-              <ReadinessRing value={profile.readiness} size={84} />
-              <p className="mt-1 text-[11px] text-[var(--muted)]">Readiness</p>
-            </div>
             {profile.isSelf && (
               <Link href="/settings">
                 <Button variant="outline" size="sm">
@@ -210,6 +207,17 @@ export default function UserProfilePage() {
         />
         <Stat label="Level" value={<span className="capitalize">{profile.preparationLevel}</span>} />
       </div>
+
+      {stats && (
+        <Card>
+          <CardHeader title="Activity" subtitle="Questions completed each day" action={<HeatLegend />} />
+          <Heatmap
+            heat={stats.heat ?? {}}
+            todayKey={istDateKey(new Date())}
+            label={`${profile.name}'s questions completed over time`}
+          />
+        </Card>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>

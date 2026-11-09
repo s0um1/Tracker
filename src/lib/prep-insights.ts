@@ -17,7 +17,6 @@ export type SubjectMastery = {
   name: string;
   total: number;
   done: number;
-  due: number;
   /** 0-100: completed questions weighted by confidence, over all questions in the subject. */
   mastery: number;
 };
@@ -27,7 +26,6 @@ export async function getPrepInsights(
   groupId: string,
   { includePersonal = true }: { includePersonal?: boolean } = {}
 ) {
-  const now = new Date();
   const [user, group, subjects, questions, today] = await Promise.all([
     User.findById(userId).select("dailyStudyMinutes").lean(),
     Group.findById(groupId).select("interviewDate").lean(),
@@ -63,10 +61,8 @@ export async function getPrepInsights(
   }).lean();
   const progressById = new Map(progress.map((p) => [String(p.questionId), p]));
 
-  const stats = new Map<string, { total: number; done: number; due: number; score: number }>();
-  for (const s of subjects) stats.set(String(s._id), { total: 0, done: 0, due: 0, score: 0 });
-
-  let dueCount = 0;
+  const stats = new Map<string, { total: number; done: number; score: number }>();
+  for (const s of subjects) stats.set(String(s._id), { total: 0, done: 0, score: 0 });
 
   for (const q of questions) {
     const st = stats.get(String(q.subjectId));
@@ -79,10 +75,6 @@ export async function getPrepInsights(
       st.done += 1;
       st.score += CONFIDENCE_VALUE[p?.confidence ?? "weak"];
     }
-    if (p?.nextReviewAt && p.nextReviewAt <= now) {
-      st.due += 1;
-      dueCount += 1;
-    }
   }
 
   const subjectMastery: SubjectMastery[] = subjects
@@ -93,7 +85,6 @@ export async function getPrepInsights(
         name: s.name,
         total: st.total,
         done: st.done,
-        due: st.due,
         mastery: st.total > 0 ? Math.round((st.score / st.total) * 100) : 0,
       };
     })
@@ -109,7 +100,6 @@ export async function getPrepInsights(
     daysLeft: countdown.hasDate ? countdown.days : null,
     isPast: countdown.isPast,
     availableMinutes: user?.dailyStudyMinutes ?? 120,
-    dueReviews: dueCount,
     weakSubjects: subjectMastery.map((s) => ({ name: s.name, mastery: s.mastery })),
     pendingTodayQuestions: pendingToday,
   });
@@ -117,7 +107,6 @@ export async function getPrepInsights(
   return {
     daysLeft: countdown.hasDate ? countdown.days : null,
     interviewDate: group?.interviewDate ? new Date(group.interviewDate).toISOString() : null,
-    dueCount,
     subjects: subjectMastery,
     plan: { ...plan, summary: planModeCopy(plan.mode) },
   };

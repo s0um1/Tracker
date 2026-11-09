@@ -215,18 +215,12 @@ async function buildAnalytics(
   }));
 
   const { memberStats, gamification } = insights;
-  const myReadiness = memberStats.find((m) => m.userId === userId)?.readiness ?? 0;
-  const avgReadiness =
-    memberStats.length > 0
-      ? Math.round(memberStats.reduce((s, m) => s + m.readiness, 0) / memberStats.length)
-      : 0;
 
   return {
     subjectCompletion,
     topicStatusBreakdown,
     mockInterviewScores,
     groupStats: {
-      avgReadiness,
       weakSubjects: subjectCompletion.filter((s) => s.percent < 50).map((s) => s.name),
     },
     personal: {
@@ -250,8 +244,6 @@ async function buildAnalytics(
         totalQuestions: visibleGroup.length,
         yourDone: groupDone,
         yourPoints: myGamification.totalPoints,
-        yourReadiness: myReadiness,
-        avgReadiness,
         memberCount: memberStats.length,
       },
       byStatus: countQuestionsByStatus(groupWithStatus.map((q) => q.status)),
@@ -270,9 +262,6 @@ async function buildAnalytics(
         points: m.totalPoints,
         userId: m.userId,
       })),
-      memberReadiness: memberStats
-        .map((m) => ({ name: m.name, readiness: m.readiness, userId: m.userId }))
-        .sort((a, b) => b.readiness - a.readiness),
     },
   };
 }

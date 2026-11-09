@@ -1,7 +1,6 @@
 import { connectToDatabase } from "@/lib/mongodb";
 import { requireAuthUserId, unauthorized } from "@/lib/api-auth";
-import { jsonOk, jsonError } from "@/lib/utils";
-import { getUserReadiness } from "@/lib/services";
+import { jsonOk, jsonError, istDateKey } from "@/lib/utils";
 import User from "@/models/User";
 import Group from "@/models/Group";
 import Subject from "@/models/Subject";
@@ -46,7 +45,6 @@ export async function GET(
       ? String(target.activeGroupId)
       : sharedGroups[0] ? String(sharedGroups[0]._id) : null;
 
-    let readiness = 0;
     let tasksCompleted = 0;
     let tasksTotal = 0;
     let weakSubjects: string[] = [];
@@ -61,6 +59,7 @@ export async function GET(
       daysSinceActive: number | null;
       studyMinutesWeek: number;
       studyMinutesTotal: number;
+      heat: Record<string, number>;
     } | null = null;
     let subjects: { name: string; mastery: number; done: number; total: number }[] = [];
     let mock: {
@@ -73,9 +72,8 @@ export async function GET(
 
     if (primaryGroupId) {
       // Independent lookups run together; tasks are counted by the database instead of loaded.
-      const [group, readinessValue, taskCount, completedTaskCount, groupSubjects, topics] = await Promise.all([
+      const [group, taskCount, completedTaskCount, groupSubjects, topics] = await Promise.all([
         Group.findById(primaryGroupId).lean(),
-        getUserReadiness(targetId, primaryGroupId),
         PrepTask.countDocuments({ userId: targetId, groupId: primaryGroupId }),
         PrepTask.countDocuments({ userId: targetId, groupId: primaryGroupId, status: "completed" }),
         Subject.find({ groupId: primaryGroupId }).select("_id name").lean(),
@@ -88,7 +86,6 @@ export async function GET(
         const c = getInterviewCountdown(group.interviewDate);
         interview = { date: new Date(group.interviewDate).toISOString(), daysLeft: c.isPast ? 0 : c.days };
       }
-      readiness = readinessValue;
       tasksCompleted = completedTaskCount;
       tasksTotal = taskCount;
       const subjectsForScores = groupSubjects;
@@ -163,6 +160,14 @@ export async function GET(
           .filter((s) => now - new Date(s.completedAt).getTime() <= 7 * DAY)
           .reduce((n, s) => n + s.durationMinutes, 0),
         studyMinutesTotal: sessions.reduce((n, s) => n + s.durationMinutes, 0),
+        heat: practised.reduce<Record<string, number>>((acc, p) => {
+          const at = new Date(p.lastPracticed ?? p.updatedAt);
+          if (now - at.getTime() <= 371 * DAY) {
+            const key = istDateKey(at);
+            acc[key] = (acc[key] ?? 0) + 1;
+          }
+          return acc;
+        }, {}),
       };
 
       const avg = (vals: number[]) =>
@@ -190,7 +195,6 @@ export async function GET(
       preparationLevel: target.preparationLevel,
       studyStreak: target.studyStreak,
       dailyStudyMinutes: target.dailyStudyMinutes,
-      readiness,
       tasksCompleted,
       tasksTotal,
       sharedGroups: sharedGroups.map((g) => ({ _id: String(g._id), name: g.name })),
