@@ -346,7 +346,6 @@ export default function QuestionListView({
                 key={q._id}
                 className={clsx(
                   "question-row",
-                  q.overdueDays && "bg-red-500/[0.06] shadow-[inset_3px_0_0_0_rgb(239_68_68)]",
                   pointBurst?.id === q._id && "question-row-points-flash"
                 )}
                 style={questionRowVars(q.status)}
